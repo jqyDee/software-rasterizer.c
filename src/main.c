@@ -8,8 +8,6 @@
 #include "parser.h"
 #include "types.h"
 
-#define ASPECT_RATIO ((float)GetScreenWidth() / (float)GetScreenHeight())
-
 int main(void) {
 
   // CUBE
@@ -28,28 +26,20 @@ int main(void) {
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, TITLE);
   }
 
-  // TRIANGLE
-  // vec3f pos1 = {0, 0, 5};
-  // vec3f pos2 = {5, 10, 5};
-  // vec3f pos3 = {10, 0, 5};
-  // vec3f positions[] = {
-  //     pos1,
-  //     pos2,
-  //     pos3,
-  // };
-  // struct mesh_s triangle = {.positions = positions, .vertex_count = 3};
+  cam cam = {(vec3f){0, 0, -20}, 0, 0};
 
-  cam cam = {(vec3f){0, 0, -10}, 0, 0};
+  int screen_width = GetScreenWidth();
+  int screen_height = GetScreenHeight();
 
-  float *depthbuffer = malloc(SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(float));
-
-  Color *framebuffer = malloc(SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(Color));
+  float *depthbuffer = malloc(screen_width * screen_height * sizeof(float));
+  Color *framebuffer = malloc(screen_width * screen_height * sizeof(Color));
 
   Image image = GenImageColor(SCREEN_WIDTH, SCREEN_HEIGHT, BLANK);
   Texture2D screenTexture = LoadTextureFromImage(image);
   UnloadImage(image);
 
   while (!WindowShouldClose()) {
+    // RENDERING
     BeginDrawing();
     {
       // INPUT HANDLING
@@ -69,13 +59,13 @@ int main(void) {
       if (IsKeyDown(KEY_E))
         cam.pos.y -= speed * deltaTime;
 
-      // RENDERING
       ClearBackground(WHITE);
 
-      clear_framebuffer(framebuffer, WHITE);
-      clear_depthbuffer(depthbuffer);
+      clear_framebuffer(framebuffer, screen_width, screen_height, WHITE);
+      clear_depthbuffer(depthbuffer, screen_width, screen_height);
 
-      render_mesh(cube, framebuffer, depthbuffer, cam);
+      render_mesh(cube, framebuffer, depthbuffer, cam, screen_width,
+                  screen_height);
 
       UpdateTexture(screenTexture, framebuffer);
       DrawTexture(screenTexture, 0, 0, WHITE);

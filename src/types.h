@@ -10,7 +10,7 @@
 #define EPSILON 1e-5f
 #define DEFAULT_TRIANGLE_COUNT 10
 
-#define FOV 45
+#define FOV 120
 
 typedef struct vec3f_s {
   float x, y, z;

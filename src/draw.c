@@ -9,15 +9,16 @@
 #include "coordinates.h"
 #include "types.h"
 
-void clear_framebuffer(Color *framebuffer, Color clearColor) {
-  for (int i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) {
+void clear_framebuffer(Color *framebuffer, int width, int height, Color clearColor) {
+  for (int i = 0; i < width * height; i++) {
     framebuffer[i] = clearColor;
   }
 }
 
-void clear_depthbuffer(float *depthbuffer) {
-  for (int i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++)
+void clear_depthbuffer(float *depthbuffer, int width, int height) {
+  for (int i = 0; i < width * height; i++) {
     depthbuffer[i] = INFINITY;
+  }
 }
 
 float edgeFunction(vec3f a, vec3f b, vec3f c) {
@@ -46,7 +47,8 @@ static inline bool point_in_triangle(const vec3f p, const vec3f a,
 }
 
 void render_mesh(const struct mesh_s mesh, Color *framebuffer,
-                 float *depthbuffer, const cam cam) {
+                 float *depthbuffer, const cam cam,
+                 int screen_width, int screen_height) {
   assert((mesh.vertex_count % 3) == 0);
 
   for (size_t veci = 0; veci + 2 < mesh.vertex_count; veci += 3) {
