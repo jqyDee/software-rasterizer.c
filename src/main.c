@@ -1,87 +1,25 @@
-#include "raylib.h"
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 
+#include "raylib.h"
+
 #include "draw.h"
+#include "parser.h"
 #include "types.h"
-#include "vec.h"
 
-struct directions_s {
-  vec3f *directions;
-  size_t vertex_count;
-};
-
-// Utility Functions
-void clear_framebuffer(Color *framebuffer, Color clearColor) {
-  for (int i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) {
-    framebuffer[i] = clearColor;
-  }
-}
-
-// Random Mesh + Direction Generation
-void generate_random_mesh(struct mesh_s *mesh, struct directions_s *directions, size_t triangle_count) {
-    if (triangle_count == 0) triangle_count = DEFAULT_TRIANGLE_COUNT;
-
-    mesh->vertex_count = triangle_count * 3;
-    mesh->positions = malloc(mesh->vertex_count * sizeof(vec3f));
-
-    directions->vertex_count = mesh->vertex_count;
-    directions->directions = malloc(mesh->vertex_count * sizeof(vec3f));
-
-    for (size_t i = 0; i < triangle_count; i++) {
-        // One random direction for this triangle
-        vec3f dir = {
-            ((rand() % 200) - 100) * 0.01f, // dx in [-1, 1)
-            ((rand() % 200) - 100) * 0.01f,
-            0.f,
-        };
-
-        // Random triangle center
-        float cx = rand() % SCREEN_WIDTH;
-        float cy = rand() % SCREEN_HEIGHT;
-        float size = 10.0f + (rand() % 10);
-
-        // Create triangle points and assign same direction to all 3
-        for (int j = 0; j < 3; j++) {
-            float angle = 2.0f * PI * j / 3.0f;
-            float px = cx + cosf(angle) * size;
-            float py = cy + sinf(angle) * size;
-
-            size_t index = i * 3 + j;
-            mesh->positions[index] = (vec3f){px, py, 0};
-            directions->directions[index] = dir;  // same for all 3
-        }
-    }
-}
-
-// Vertex Movement with Edge Detection
-void move_vertices(struct mesh_s *mesh, struct directions_s *directions) {
-  for (size_t i = 0; i < directions->vertex_count; i++) {
-    mesh->positions[i] = vec_add(mesh->positions[i], directions->directions[i]);
-
-    if (mesh->positions[i].x < 0 || mesh->positions[i].x >= SCREEN_WIDTH ||
-        mesh->positions[i].y < 0 || mesh->positions[i].y >= SCREEN_HEIGHT) {
-
-      if (mesh->positions[i].x < 0)
-        mesh->positions[i].x = 0;
-      if (mesh->positions[i].x >= SCREEN_WIDTH)
-        mesh->positions[i].x = SCREEN_WIDTH - 1;
-      if (mesh->positions[i].y < 0)
-        mesh->positions[i].y = 0;
-      if (mesh->positions[i].y >= SCREEN_HEIGHT)
-        mesh->positions[i].y = SCREEN_HEIGHT - 1;
-
-      float dx = ((rand() % 200) - 100) * 0.01f;
-      float dy = ((rand() % 200) - 100) * 0.01f;
-      directions->directions[i] = (vec3f){dx, dy, 0.f};
-    }
-  }
-}
+#define ASPECT_RATIO ((float)GetScreenWidth() / (float)GetScreenHeight())
 
 int main(void) {
+
+  // CUBE
+  struct mesh_s cube;
+  if (!load_obj("./obj/cube.obj", &cube)) {
+    return 1;
+  }
+
   srand(time(NULL));
+
   InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, TITLE);
   if (GetMonitorHeight(0) > SCREEN_HEIGHT ||
       GetMonitorWidth(0) > SCREEN_WIDTH) {
@@ -90,9 +28,20 @@ int main(void) {
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, TITLE);
   }
 
-  struct mesh_s mesh;
-  struct directions_s directions;
-  generate_random_mesh(&mesh, &directions, 20);
+  // TRIANGLE
+  // vec3f pos1 = {0, 0, 5};
+  // vec3f pos2 = {5, 10, 5};
+  // vec3f pos3 = {10, 0, 5};
+  // vec3f positions[] = {
+  //     pos1,
+  //     pos2,
+  //     pos3,
+  // };
+  // struct mesh_s triangle = {.positions = positions, .vertex_count = 3};
+
+  cam cam = {(vec3f){0, 0, -10}, 0, 0};
+
+  float *depthbuffer = malloc(SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(float));
 
   Color *framebuffer = malloc(SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(Color));
 
@@ -103,16 +52,35 @@ int main(void) {
   while (!WindowShouldClose()) {
     BeginDrawing();
     {
-      ClearBackground(BLACK);
+      // INPUT HANDLING
+      float deltaTime = GetFrameTime();
+      float speed = 5.0f;
 
-      clear_framebuffer(framebuffer, BLACK);
-      move_vertices(&mesh, &directions);
+      if (IsKeyDown(KEY_W))
+        cam.pos.z += speed * deltaTime;
+      if (IsKeyDown(KEY_S))
+        cam.pos.z -= speed * deltaTime;
+      if (IsKeyDown(KEY_A))
+        cam.pos.x -= speed * deltaTime;
+      if (IsKeyDown(KEY_D))
+        cam.pos.x += speed * deltaTime;
+      if (IsKeyDown(KEY_Q))
+        cam.pos.y += speed * deltaTime;
+      if (IsKeyDown(KEY_E))
+        cam.pos.y -= speed * deltaTime;
 
-      draw_mesh(mesh, framebuffer);
+      // RENDERING
+      ClearBackground(WHITE);
+
+      clear_framebuffer(framebuffer, WHITE);
+      clear_depthbuffer(depthbuffer);
+
+      render_mesh(cube, framebuffer, depthbuffer, cam);
+
       UpdateTexture(screenTexture, framebuffer);
-
       DrawTexture(screenTexture, 0, 0, WHITE);
 
+      // FPS
       char fpsText[20];
       sprintf(fpsText, "FPS: %d", GetFPS());
       DrawText(fpsText, 10, 10, 20, RED);
@@ -120,9 +88,9 @@ int main(void) {
     EndDrawing();
   }
 
-  free(mesh.positions);
-  free(directions.directions);
+  free(cube.positions);
   free(framebuffer);
+  free(depthbuffer);
   UnloadTexture(screenTexture);
   CloseWindow();
   return 0;
