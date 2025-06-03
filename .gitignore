@@ -3,6 +3,6 @@
 !*.c
 !README.md
 !LICENSE
-!*.gitignore
-!src
-!libs
+!**/.gitignore
+!**src
+!**libs
