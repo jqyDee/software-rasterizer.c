@@ -10,8 +10,9 @@ RAYLIB_LIB := $(RAYLIB_DIR)/libraylib.a
 RAYLIB_INCLUDE := $(RAYLIB_DIR)
 
 # Compiler settings
-CFLAGS := -I$(RAYLIB_INCLUDE) -I$(RAYLIB_DIR)/external -Wall -g
-LDFLAGS := -L$(RAYLIB_DIR) -lraylib -lm -ldl -lpthread -framework Cocoa -framework IOKit -framework CoreVideo
+CC := clang
+CFLAGS := -I$(RAYLIB_INCLUDE) -I$(RAYLIB_DIR)/external -Wall -g -fsanitize=address
+LDFLAGS := -L$(RAYLIB_DIR) -lraylib -g -lm -ldl -lpthread -framework Cocoa -framework IOKit -framework CoreVideo -fsanitize=address
 
 # Source files
 SRCS := $(wildcard $(SRC_DIR)/*.c)

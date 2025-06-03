@@ -5,17 +5,10 @@
 #include "raylib.h"
 
 #include "draw.h"
-#include "parser.h"
+#include "engine.h"
 #include "types.h"
 
 int main(void) {
-
-  // CUBE
-  struct mesh_s cube;
-  if (!load_obj("./obj/cube.obj", &cube)) {
-    return 1;
-  }
-
   srand(time(NULL));
 
   InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, TITLE);
@@ -26,62 +19,49 @@ int main(void) {
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, TITLE);
   }
 
-  cam cam = {(vec3f){0, 0, -20}, 0, 0};
+  const char *obj_paths[] = {
+      "./obj/Suzanne.obj",
+  };
 
-  int screen_width = GetScreenWidth();
-  int screen_height = GetScreenHeight();
+  world world;
+  if (!init_world(&world, obj_paths, 1)) {
+    return 0;
+  }
 
-  float *depthbuffer = malloc(screen_width * screen_height * sizeof(float));
-  Color *framebuffer = malloc(screen_width * screen_height * sizeof(Color));
-
-  Image image = GenImageColor(SCREEN_WIDTH, SCREEN_HEIGHT, BLANK);
-  Texture2D screenTexture = LoadTextureFromImage(image);
-  UnloadImage(image);
-
+  int count = 0;
   while (!WindowShouldClose()) {
-    // RENDERING
     BeginDrawing();
     {
-      // INPUT HANDLING
       float deltaTime = GetFrameTime();
-      float speed = 5.0f;
-
-      if (IsKeyDown(KEY_W))
-        cam.pos.z += speed * deltaTime;
-      if (IsKeyDown(KEY_S))
-        cam.pos.z -= speed * deltaTime;
-      if (IsKeyDown(KEY_A))
-        cam.pos.x -= speed * deltaTime;
-      if (IsKeyDown(KEY_D))
-        cam.pos.x += speed * deltaTime;
-      if (IsKeyDown(KEY_Q))
-        cam.pos.y += speed * deltaTime;
-      if (IsKeyDown(KEY_E))
-        cam.pos.y -= speed * deltaTime;
-
+      handle_user_input(world.cam, deltaTime);
+      if (count == 200) {
+        printf("x: %f, y: %f, z: %f; pitch: %f; yaw: %f; fov: %f\n",
+               world.cam->pos.x, world.cam->pos.y, world.cam->pos.z,
+               world.cam->pitch, world.cam->yaw, world.cam->fov);
+        count = 0;
+      } else {
+        count++;
+      }
       ClearBackground(WHITE);
 
-      clear_framebuffer(framebuffer, screen_width, screen_height, WHITE);
-      clear_depthbuffer(depthbuffer, screen_width, screen_height);
+      clear_framebuffer(world.renderer, WHITE);
+      clear_depthbuffer(world.renderer);
 
-      render_mesh(cube, framebuffer, depthbuffer, cam, screen_width,
-                  screen_height);
+      render_world(&world);
 
-      UpdateTexture(screenTexture, framebuffer);
-      DrawTexture(screenTexture, 0, 0, WHITE);
+      UpdateTexture(world.renderer->screen_texture,
+                    world.renderer->framebuffer);
+      DrawTexture(world.renderer->screen_texture, 0, 0, WHITE);
 
       // FPS
-      char fpsText[20];
-      sprintf(fpsText, "FPS: %d", GetFPS());
+      char fpsText[32];
+      snprintf(fpsText, sizeof(fpsText), "FPS: %d", GetFPS());
       DrawText(fpsText, 10, 10, 20, RED);
     }
     EndDrawing();
   }
 
-  free(cube.positions);
-  free(framebuffer);
-  free(depthbuffer);
-  UnloadTexture(screenTexture);
+  destroy_world(&world);
   CloseWindow();
   return 0;
 }

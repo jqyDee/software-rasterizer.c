@@ -12,11 +12,10 @@ bool load_obj(const char *filename, struct mesh_s *mesh) {
     return false;
   }
 
-  vec3f temp_vertices[2048];
+  vec3f temp_vertices[4096];
   size_t temp_vertex_count = 0;
 
-  // Temporarily store triangle indices (we'll allocate once we know how many)
-  int face_indices[4096][3];
+  int face_indices[16384][3]; // Bigger to fit split quads
   size_t face_count = 0;
 
   char line[256];
@@ -26,29 +25,45 @@ bool load_obj(const char *filename, struct mesh_s *mesh) {
       sscanf(line, "v %f %f %f", &v.x, &v.y, &v.z);
       temp_vertices[temp_vertex_count++] = v;
     } else if (strncmp(line, "f ", 2) == 0) {
-      int vi[3];
-      if (sscanf(line, "f %d/%*d/%*d %d/%*d/%*d %d/%*d/%*d", &vi[0], &vi[1],
-                 &vi[2]) == 3) {
+      int vi[4];
+      int matches = sscanf(line, "f %d/%*d/%*d %d/%*d/%*d %d/%*d/%*d %d/%*d/%*d",
+                           &vi[0], &vi[1], &vi[2], &vi[3]);
+
+      if (matches == 3) {
+        // Triangle
         for (int i = 0; i < 3; i++) {
-          face_indices[face_count][i] = vi[i] - 1; // OBJ is 1-based
+          face_indices[face_count][i] = vi[i] - 1;
         }
+        face_count++;
+      } else if (matches == 4) {
+        // Quad: split into two triangles
+        // Triangle 1: v0, v1, v2
+        face_indices[face_count][0] = vi[0] - 1;
+        face_indices[face_count][1] = vi[1] - 1;
+        face_indices[face_count][2] = vi[2] - 1;
+        face_count++;
+
+        // Triangle 2: v0, v2, v3
+        face_indices[face_count][0] = vi[0] - 1;
+        face_indices[face_count][1] = vi[2] - 1;
+        face_indices[face_count][2] = vi[3] - 1;
         face_count++;
       }
     }
   }
   fclose(file);
 
-  // Allocate once with exact size
   mesh->vertex_count = face_count * 3;
-  mesh->positions = malloc(mesh->vertex_count * sizeof(vec3f));
-  if (!mesh->positions)
+  mesh->vertices = malloc(mesh->vertex_count * sizeof(vec3f));
+  if (!mesh->vertices)
     return false;
 
   for (size_t i = 0; i < face_count; ++i) {
     for (int j = 0; j < 3; ++j) {
-      mesh->positions[i * 3 + j] = temp_vertices[face_indices[i][j]];
+      mesh->vertices[i * 3 + j] = temp_vertices[face_indices[i][j]];
     }
   }
 
   return true;
 }
+
