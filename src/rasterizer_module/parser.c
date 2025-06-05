@@ -25,25 +25,30 @@ bool load_obj(const char *filename, struct mesh_s *mesh) {
       sscanf(line, "v %f %f %f", &v.x, &v.y, &v.z);
       temp_vertices[temp_vertex_count++] = v;
     } else if (strncmp(line, "f ", 2) == 0) {
-      int vi[4];
-      int matches = sscanf(line, "f %d/%*d/%*d %d/%*d/%*d %d/%*d/%*d %d/%*d/%*d",
-                           &vi[0], &vi[1], &vi[2], &vi[3]);
+      int vi[4] = {-1, -1, -1, -1};
+      int count = 0;
 
-      if (matches == 3) {
+      char *token = strtok(line + 2, " ");
+      while (token && count < 4) {
+        // Parse only vertex index before any slash
+        sscanf(token, "%d", &vi[count]);
+        count++;
+        token = strtok(NULL, " ");
+      }
+
+      if (count == 3) {
         // Triangle
         for (int i = 0; i < 3; i++) {
           face_indices[face_count][i] = vi[i] - 1;
         }
         face_count++;
-      } else if (matches == 4) {
-        // Quad: split into two triangles
-        // Triangle 1: v0, v1, v2
+      } else if (count == 4) {
+        // Quad split into two triangles
         face_indices[face_count][0] = vi[0] - 1;
         face_indices[face_count][1] = vi[1] - 1;
         face_indices[face_count][2] = vi[2] - 1;
         face_count++;
 
-        // Triangle 2: v0, v2, v3
         face_indices[face_count][0] = vi[0] - 1;
         face_indices[face_count][1] = vi[2] - 1;
         face_indices[face_count][2] = vi[3] - 1;
@@ -66,4 +71,3 @@ bool load_obj(const char *filename, struct mesh_s *mesh) {
 
   return true;
 }
-

@@ -9,6 +9,8 @@
 #define SCREEN_WIDTH 1000
 #define SCREEN_HEIGHT 800
 
+#define EPSILON 1e-2f
+
 // #define EPSILON 1e-5f
 
 typedef struct vec3f_s {
@@ -40,5 +42,7 @@ typedef struct world_s {
   renderer *renderer;
   mesh *meshes;
   size_t mesh_count;
+  size_t obj_count;
+  char **obj_paths;
 } world;
 
