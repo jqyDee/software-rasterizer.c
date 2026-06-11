@@ -9,6 +9,7 @@
 #include "types.h"
 #include "update.h"
 
+
 void *rasterizer(void *saved_state) {
   srand(time(NULL));
 

@@ -61,6 +61,9 @@ buffer in a window.
 * A standard C compiler (GCC or Clang)
 * `make`
 * Git
+* (macOS: the current build script is only validated (and as far as I know only
+  works) on macOS)
+  > Feel free to implement cross platform building
 
 ### Installation & Build
 

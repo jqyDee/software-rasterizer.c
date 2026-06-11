@@ -168,14 +168,18 @@ void render_mesh(world *world, const mesh mesh) {
     float hue = fmodf((float)triangle_index * 10.0f, 360.0f);
     Color color = hsv_to_rgb(hue, 1.0f, 1.0f);
     vec3f projected[3];
+
     if (!project_triangle(world, &mesh, i, projected)) {
-      color = MAGENTA;
-    } else if (is_backfacing(v_cam)) {
+      continue;
+    }
+
+#ifdef DEBUG
+    if (is_backfacing(v_cam)) {
       color = RED;
     } else {
       color = GREEN;
     }
-
+#endif
 
     draw_triangle_pixels(world, projected[0], projected[1], projected[2],
                          color);
