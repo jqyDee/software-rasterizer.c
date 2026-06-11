@@ -88,6 +88,11 @@ buffer in a window.
    ./bin/rasterizer
    ```
 
+### Important
+Currently there is an error in the Makefile. Running `make {all,run}` does not
+rebuild the shared lib. This needs to be fixed in the future. Mitigate with
+`make clean && make run`.
+
 ## 🧠 What I Learned
 
 Building this project taught me the fundamental mathematics and algorithms
