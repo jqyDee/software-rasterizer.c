@@ -51,6 +51,15 @@ int handle_user_input(cam *cam, const float delta_time) {
     is_rotating = false;
   }
 
+  float sensitivity = 1.0f;
+  if (IsKeyDown(KEY_Z)) {
+    cam->yaw += sensitivity * delta_time;
+    cam->pitch += sensitivity * delta_time;
+  }
+  if (IsKeyDown(KEY_X)) {
+    cam->yaw -= sensitivity * delta_time;
+  }
+
   // MOVE CAMERA WITH WASDQE RELATIVE TO YAW/PITCH
   vec3f forward = get_forward(cam);
   vec3f right = get_right(cam);
