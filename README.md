@@ -1,5 +1,8 @@
 # C Software Rasterizer
 
+![](https://github.com/jqyDee/software-rasterizer.c/blob/main/.github/images/rasterizer.png)
+
+
 A CPU-based 3D software rasterizer written entirely from scratch in C. 
 
 Instead of relying on hardware acceleration (OpenGL/Vulkan) to render 3D
