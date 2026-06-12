@@ -12,7 +12,7 @@ parsing, and rasterization logic natively, using
 [Raylib](https://www.raylib.com/) strictly as a host to display the final pixel
 buffer in a window.
 
-## ✨ Features
+## Features
 
 * **Custom 3D Engine**: Core rasterization module built from scratch
   (`src/rasterizer_module/`).
@@ -26,13 +26,13 @@ buffer in a window.
 * **Separation of Concerns**: Clean architectural split between the host
   window/input (`src/host/`) and the platform-agnostic rendering engine.
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 * **Language**: C
 * **Display/Input Host**: Raylib (included as a submodule)
 * **Build System**: Make
 
-## 📂 Project Structure
+## Project Structure
 
 ```text
 .
@@ -57,7 +57,7 @@ buffer in a window.
 └── generate_compile_commands.sh # Tooling setup
 ```
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -93,7 +93,7 @@ Currently there is an error in the Makefile. Running `make {all,run}` does not
 rebuild the shared lib. This needs to be fixed in the future. Mitigate with
 `make clean && make run`.
 
-## 🧠 What I Learned
+## What I Learned
 
 Building this project taught me the fundamental mathematics and algorithms
 behind 3D graphics. Specifically, I gained hands-on experience with:
@@ -103,6 +103,6 @@ behind 3D graphics. Specifically, I gained hands-on experience with:
 * The challenges and techniques of optimizing CPU rendering without hardware
   acceleration.
 
-## 📜 License
+## License
 
 This project is open source and available under the [LICENSE](LICENSE) file.
