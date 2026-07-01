@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <math.h>
+#include <omp.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,9 +61,10 @@ Color hsv_to_rgb(float h, float s, float v) {
 }
 
 static bool transform_triangle_to_camera(const mesh *mesh, size_t i,
-                                         const cam *cam, vec3f out[3]) {
+                                         vec3f pos, const cam *cam,
+                                         vec3f out[3]) {
   for (int j = 0; j < 3; j++) {
-    vec3f relative_pos = vec_sub(mesh->vertices[i + j], cam->pos);
+    vec3f relative_pos = vec_sub(vec_add(mesh->vertices[i + j], pos), cam->pos);
     out[j] = rotate_vector(relative_pos, -cam->pitch, -cam->yaw);
   }
   return true;
@@ -75,36 +77,16 @@ bool is_backfacing(const vec3f triangleVerts[3]) {
   vec3f normal = vec_cross(edge1, edge2);
   normal = vec_normalize(normal);
 
-  // Camera looks along negative Z in camera space:
-  vec3f view_dir = {0.0f, 0.0f, 1.0f};
+  vec3f centroid = {
+      (triangleVerts[0].x + triangleVerts[1].x + triangleVerts[2].x) / 3.0f,
+      (triangleVerts[0].y + triangleVerts[1].y + triangleVerts[2].y) / 3.0f,
+      (triangleVerts[0].z + triangleVerts[1].z + triangleVerts[2].z) / 3.0f,
+  };
+  vec3f view_dir = vec_normalize(vec3f_scale(centroid, -1.0f));
 
-  float dot_nv =
-      normal.x * view_dir.x + normal.y * view_dir.y + normal.z * view_dir.z;
+  float dot_nv = vec_dot(normal, view_dir);
 
-  return (dot_nv >= 0.0f);
-}
-
-static bool project_triangle(world *world, const mesh *mesh, size_t i,
-                             vec3f out[3]) {
-  bool in = project(world, mesh->vertices[i], &out[0]) &&
-            project(world, mesh->vertices[i + 1], &out[1]) &&
-            project(world, mesh->vertices[i + 2], &out[2]);
-  float dx01 = out[0].x - out[1].x;
-  float dy01 = out[0].y - out[1].y;
-  float dx12 = out[1].x - out[2].x;
-  float dy12 = out[1].y - out[2].y;
-  float dx20 = out[2].x - out[0].x;
-  float dy20 = out[2].y - out[0].y;
-
-  float dist2_01 = dx01 * dx01 + dy01 * dy01;
-  float dist2_12 = dx12 * dx12 + dy12 * dy12;
-  float dist2_20 = dx20 * dx20 + dy20 * dy20;
-
-  if (dist2_01 < 1e-2f || dist2_12 < 1e-2f || dist2_20 < 1e-2f) {
-    return false;
-  }
-
-  return in;
+  return (dot_nv < 0.0f);
 }
 
 static void compute_triangle_bbox(const vec3f v1, const vec3f v2,
@@ -136,8 +118,9 @@ static void draw_triangle_pixels(world *world, const vec3f v1, const vec3f v2,
   float *depthbuffer = world->renderer->depthbuffer;
   Color *framebuffer = world->renderer->framebuffer;
 
-  float u, v, w;
+  #pragma omp parallel for schedule(static) if(endY - startY > world->settings.parallel_cutoff_rows)
   for (int row = startY; row <= endY; row++) {
+    float u, v, w;
     for (int col = startX; col <= endX; col++) {
       vec3f p = {col + 0.5f, row + 0.5f, 0.f};
 
@@ -154,40 +137,55 @@ static void draw_triangle_pixels(world *world, const vec3f v1, const vec3f v2,
   }
 }
 
-void render_mesh(world *world, const mesh mesh) {
-  assert((mesh.vertex_count % 3) == 0);
+void render_mesh(world *world, const mesh_instance *inst) {
+  const mesh *mesh = inst->mesh;
+  assert((mesh->vertex_count % 3) == 0);
 
-  for (size_t i = 0; i + 2 < mesh.vertex_count; i += 3) {
+  for (size_t i = 0; i + 2 < mesh->vertex_count; i += 3) {
     vec3f v_cam[3];
-    if (!transform_triangle_to_camera(&mesh, i, world->cam, v_cam))
+    if (!transform_triangle_to_camera(mesh, i, inst->pos, world->cam, v_cam))
       continue;
+
     if (is_backfacing(v_cam))
+      continue;
+
+    vec3f clipped[4];
+    int clipped_count = clip_triangle_near_plane(v_cam, world->settings.near_plane, clipped);
+    if (clipped_count < 3)
       continue;
 
     int triangle_index = i / 3;
     float hue = fmodf((float)triangle_index * 10.0f, 360.0f);
     Color color = hsv_to_rgb(hue, 1.0f, 1.0f);
-    vec3f projected[3];
 
-    if (!project_triangle(world, &mesh, i, projected)) {
-      continue;
+    for (int t = 0; t + 2 < clipped_count; t++) {
+      vec3f fan[3] = {clipped[0], clipped[t + 1], clipped[t + 2]};
+      vec3f projected[3];
+
+      for (int j = 0; j < 3; j++)
+        project_cam(world, fan[j], &projected[j]);
+
+      float dx01 = projected[0].x - projected[1].x;
+      float dy01 = projected[0].y - projected[1].y;
+      float dx12 = projected[1].x - projected[2].x;
+      float dy12 = projected[1].y - projected[2].y;
+      float dx20 = projected[2].x - projected[0].x;
+      float dy20 = projected[2].y - projected[0].y;
+      if (dx01 * dx01 + dy01 * dy01 < 1e-2f)
+        continue;
+      if (dx12 * dx12 + dy12 * dy12 < 1e-2f)
+        continue;
+      if (dx20 * dx20 + dy20 * dy20 < 1e-2f)
+        continue;
+
+      draw_triangle_pixels(world, projected[0], projected[1], projected[2],
+                           color);
     }
-
-#ifdef DEBUG
-    if (is_backfacing(v_cam)) {
-      color = RED;
-    } else {
-      color = GREEN;
-    }
-#endif
-
-    draw_triangle_pixels(world, projected[0], projected[1], projected[2],
-                         color);
   }
 }
 
 void render_world(world *world) {
-  for (size_t i = 0; i < world->mesh_count; i++) {
-    render_mesh(world, world->meshes[i]);
+  for (size_t i = 0; i < world->instance_count; i++) {
+    render_mesh(world, &world->instances[i]);
   }
 }

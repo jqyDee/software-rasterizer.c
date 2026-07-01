@@ -21,6 +21,49 @@ vec3f rotate_vector(const vec3f v, const float pitch, const float yaw) {
   return vPitch;
 }
 
+int clip_triangle_near_plane(const vec3f verts[3], float near, vec3f out[4]) {
+  int out_count = 0;
+
+  for (int i = 0; i < 3; i++) {
+    vec3f curr = verts[i];
+    vec3f prev = verts[(i + 2) % 3];
+
+    bool curr_inside = curr.z >= near;
+    bool prev_inside = prev.z >= near;
+
+    if (curr_inside) {
+      if (!prev_inside) {
+        float t = (near - prev.z) / (curr.z - prev.z);
+        out[out_count++] = (vec3f){
+          prev.x + t * (curr.x - prev.x),
+          prev.y + t * (curr.y - prev.y),
+          near,
+        };
+      }
+      out[out_count++] = curr;
+    } else if (prev_inside) {
+      float t = (near - prev.z) / (curr.z - prev.z);
+      out[out_count++] = (vec3f){
+        prev.x + t * (curr.x - prev.x),
+        prev.y + t * (curr.y - prev.y),
+        near,
+      };
+    }
+  }
+
+  return out_count;
+}
+
+void project_cam(const world *world, vec3f cam_pos, vec3f *out) {
+  float x_proj = (cam_pos.x / cam_pos.z) * world->cam->focal_length;
+  float y_proj = (cam_pos.y / cam_pos.z) * world->cam->focal_length *
+                 world->renderer->aspect_ratio;
+
+  out->x = (x_proj + 1.0f) * 0.5f * world->renderer->screen_width;
+  out->y = (1.0f - y_proj) * 0.5f * world->renderer->screen_height;
+  out->z = cam_pos.z;
+}
+
 static inline float edgeFunction(vec3f a, vec3f b, vec3f c) {
   return (c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x);
 }

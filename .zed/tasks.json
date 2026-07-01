@@ -1,0 +1,12 @@
+[
+  {
+    "label": "Build Debug",
+    "command": "make debug",
+    "cwd": "$ZED_WORKTREE_ROOT"
+  },
+  {
+    "label": "Build Release",
+    "command": "make",
+    "cwd": "$ZED_WORKTREE_ROOT"
+  }
+]

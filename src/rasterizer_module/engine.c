@@ -3,12 +3,12 @@
 #include <stdlib.h>
 
 #include "parser.h"
+#include "raylib.h"
 #include "types.h"
 #include "vec.h"
 
 static inline vec3f get_forward(cam *cam) {
-  return (vec3f){cosf(cam->pitch) * sinf(cam->yaw), sinf(cam->pitch),
-                 cosf(cam->pitch) * cosf(cam->yaw)};
+  return (vec3f){sinf(cam->yaw), 0, cosf(cam->yaw)};
 }
 
 static inline vec3f get_right(cam *cam) {
@@ -16,14 +16,23 @@ static inline vec3f get_right(cam *cam) {
 }
 
 // 0 is nothing, 1 is reload .so, 2 is reload meshes and camera
-int handle_user_input(cam *cam, const float delta_time) {
+int handle_user_input(world *world, const float delta_time) {
+  cam *cam = world->cam;
+  settings *settings = &world->settings;
+
   static bool is_rotating = false;
-  static Vector2 window_center = {SCREEN_WIDTH / 2.0f, SCREEN_HEIGHT / 2.0f};
+
+  // Use renderer display dims (not GetScreenWidth) so window_center is always
+  // consistent with display_width, preventing cursor clamping and drift.
+  static Vector2 window_center;
+  window_center.x = (float)world->renderer->display_width / 2.0f;
+  window_center.y = (float)world->renderer->display_height / 2.0f;
+
   const float mouse_sensitivity = 0.003f;
   const float move_speed = 5.0f;
 
   // MOUSE LOOK ONLY IF LEFT BUTTON HELD
-  if (IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
+  if (IsMouseButtonDown(MOUSE_LEFT_BUTTON) && !settings->show_debug_gui) {
     if (!is_rotating) {
       // First frame: center mouse, no rotation yet
       SetMousePosition(window_center.x, window_center.y);
@@ -51,16 +60,7 @@ int handle_user_input(cam *cam, const float delta_time) {
     is_rotating = false;
   }
 
-  float sensitivity = 1.0f;
-  if (IsKeyDown(KEY_Z)) {
-    cam->yaw += sensitivity * delta_time;
-    cam->pitch += sensitivity * delta_time;
-  }
-  if (IsKeyDown(KEY_X)) {
-    cam->yaw -= sensitivity * delta_time;
-  }
-
-  // MOVE CAMERA WITH WASDQE RELATIVE TO YAW/PITCH
+  // MOVE CAMERA WITH WASDQE (horizontal plane fixed, Q/E vertical)
   vec3f forward = get_forward(cam);
   vec3f right = get_right(cam);
 
@@ -76,10 +76,10 @@ int handle_user_input(cam *cam, const float delta_time) {
   if (IsKeyDown(KEY_D)) {
     cam->pos = vec_sub(cam->pos, vec_scale(right, move_speed * delta_time));
   }
-  if (IsKeyDown(KEY_Q)) {
+  if (IsKeyDown(KEY_SPACE)) {
     cam->pos.y += move_speed * delta_time;
   }
-  if (IsKeyDown(KEY_E)) {
+  if (IsKeyDown(KEY_LEFT_SHIFT)) {
     cam->pos.y -= move_speed * delta_time;
   }
 
@@ -112,8 +112,14 @@ void destroy_world(world *world) {
   if (world->cam)
     free(world->cam);
 
-  if (world->meshes)
-    free(world->meshes);
+  if (world->mesh_data) {
+    for (size_t i = 0; i < world->mesh_data_count; i++)
+      free(world->mesh_data[i].vertices);
+    free(world->mesh_data);
+  }
+
+  if (world->instances)
+    free(world->instances);
 }
 
 bool init_cam(cam *cam) {
@@ -140,58 +146,95 @@ void init_texture(renderer *renderer) {
   UnloadImage(image);
 }
 
-bool init_renderer(renderer *renderer) {
-  renderer->screen_width = GetScreenWidth();
-  renderer->screen_height = GetScreenHeight();
-  renderer->aspect_ratio =
-      (float)renderer->screen_width / renderer->screen_height;
+void resize_renderer_to(world *world, int display_w, int display_h) {
+  renderer *renderer = world->renderer;
+  int render_width   = world->settings.render_width;
 
-  renderer->framebuffer =
-      malloc(renderer->screen_width * renderer->screen_height * sizeof(Color));
-  if (!renderer->framebuffer) {
-    return false;
-  }
+  renderer->display_width  = display_w;
+  renderer->display_height = display_h;
 
-  renderer->depthbuffer =
-      malloc(renderer->screen_width * renderer->screen_height * sizeof(float));
+  int new_w = render_width;
+  int new_h = (int)(render_width * ((float)display_h / (float)display_w));
 
-  if (!renderer->depthbuffer) {
-    return false;
-  }
+  renderer->screen_width  = new_w;
+  renderer->screen_height = new_h;
+  renderer->aspect_ratio  = (float)new_w / (float)new_h;
 
+  free(renderer->framebuffer);
+  free(renderer->depthbuffer);
+  renderer->framebuffer = malloc(new_w * new_h * sizeof(Color));
+  if (!renderer->framebuffer)
+    exit(2);
+
+  renderer->depthbuffer = malloc(new_w * new_h * sizeof(float));
+  if (!renderer->depthbuffer)
+    exit(2);
+
+  UnloadTexture(renderer->screen_texture);
   init_texture(renderer);
+}
+
+void resize_renderer(world *world) {
+  resize_renderer_to(world, GetScreenWidth(), GetScreenHeight());
+}
+
+static bool create_floor_mesh(mesh *m, float y, float size) {
+  m->vertex_count = 6;
+  m->vertices = malloc(6 * sizeof(vec3f));
+  if (!m->vertices)
+    return false;
+
+  float s = size;
+  // CCW winding from above → normal points +y (up)
+  m->vertices[0] = (vec3f){-s, y, -s};
+  m->vertices[1] = (vec3f){ s, y,  s};
+  m->vertices[2] = (vec3f){ s, y, -s};
+  m->vertices[3] = (vec3f){-s, y, -s};
+  m->vertices[4] = (vec3f){-s, y,  s};
+  m->vertices[5] = (vec3f){ s, y,  s};
 
   return true;
 }
 
 bool load_objs_files(world *world, char *obj_paths[], const size_t obj_count) {
-  world->mesh_count = obj_count;
-  world->meshes = malloc(obj_count * sizeof(mesh));
-  if (!world->meshes) {
+  size_t total = obj_count + 1; // +1 for floor
+
+  world->mesh_data_count = total;
+  world->mesh_data = malloc(total * sizeof(mesh));
+  if (!world->mesh_data)
     return false;
-  }
 
-  if (obj_paths == NULL) {
-    return true;
-  }
+  world->instance_count = total;
+  world->instances = malloc(total * sizeof(mesh_instance));
+  if (!world->instances)
+    return false;
 
-  world->obj_paths = obj_paths;
-  world->obj_count = obj_count;
+  if (obj_paths != NULL) {
+    world->obj_paths = obj_paths;
+    world->obj_count = obj_count;
 
-  for (size_t i = 0; i < obj_count; i++) {
-    if (!load_obj(obj_paths[i], &world->meshes[i])) {
-      return false;
+    for (size_t i = 0; i < obj_count; i++) {
+      if (!load_obj(obj_paths[i], &world->mesh_data[i]))
+        return false;
+      world->instances[i].mesh = &world->mesh_data[i];
+      world->instances[i].pos  = (vec3f){5.0f * i, 1.0f, 0.0f};
     }
   }
+
+  if (!create_floor_mesh(&world->mesh_data[obj_count], 0.0f, 10.0f))
+    return false;
+  world->instances[obj_count].mesh = &world->mesh_data[obj_count];
+  world->instances[obj_count].pos  = (vec3f){0, 0, 0};
 
   return true;
 }
 
-bool init_world(world *world, char *obj_paths[], const size_t obj_count) {
+bool init_world(world *world, char *obj_paths[], const size_t obj_count,
+                int display_w, int display_h) {
   renderer *rendererM = malloc(sizeof(renderer));
-  if (!init_renderer(rendererM)) {
+  if (!rendererM)
     return false;
-  }
+  *rendererM = (renderer){0};
 
   cam *camM = malloc(sizeof(cam));
   if (!init_cam(camM)) {
@@ -201,12 +244,19 @@ bool init_world(world *world, char *obj_paths[], const size_t obj_count) {
 
   world->cam = camM;
   world->renderer = rendererM;
+  world->settings = (settings){
+    .show_debug_gui       = false,
+    .render_width         = BASE_RENDER_WIDTH,
+    .parallel_cutoff_rows = CUT_OFF_PARALLEL_DRAWING,
+    .near_plane           = NEAR_PLANE,
+  };
+
+  resize_renderer_to(world, display_w, display_h);
 
   if (!load_objs_files(world, obj_paths, obj_count)) {
-      destroy_world(world);
-      return false;
+    destroy_world(world);
+    return false;
   }
 
   return true;
 }
-

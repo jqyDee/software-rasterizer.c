@@ -3,12 +3,18 @@
 
 #include <dlfcn.h>
 
+#if defined(__APPLE__)
+#define PLUGIN_PATH BIN_DIR "/rasterizer.dylib"
+#else
+#define PLUGIN_PATH BIN_DIR "/rasterizer.so"
+#endif
+
 int main(void) {
   void *state = NULL;
 
   int cycle = 0;
   while (true && cycle <= 10) {
-    void *module = dlopen("./bin/rasterizer.so", RTLD_NOW);
+    void *module = dlopen(PLUGIN_PATH, RTLD_NOW);
 
     if (module == NULL) {
       cycle++;

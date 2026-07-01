@@ -1,0 +1,4 @@
+CompileFlags:
+  Add:
+    - -I../../libs/raylib/src
+    - -I../../libs/raygui

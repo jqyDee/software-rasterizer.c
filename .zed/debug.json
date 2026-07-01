@@ -1,0 +1,27 @@
+[
+  {
+    "adapter": "CodeLLDB",
+    "label": "Debug Rasterizer",
+    "request": "launch",
+    "program": "/Users/mfischbach/Developer/projects/software-rasterizer.c/bin/debug/rasterizer",
+    "args": [],
+    "env": {
+      "DYLD_LIBRARY_PATH": "/Users/mfischbach/Developer/projects/software-rasterizer.c/bin/debug:/Users/mfischbach/Developer/projects/software-rasterizer.c/libs/raylib/src"
+    },
+    "cwd": "/Users/mfischbach/Developer/projects/software-rasterizer.c",
+    "preLaunchTask": "Build Debug"
+  },
+  {
+    "adapter": "CodeLLDB",
+    "label": "Run Rasterizer",
+    "request": "launch",
+    "program": "/Users/mfischbach/Developer/projects/software-rasterizer.c/bin/release/rasterizer",
+    "args": [],
+    "env": {
+      "DYLD_LIBRARY_PATH": "/Users/mfischbach/Developer/projects/software-rasterizer.c/bin/release:/Users/mfischbach/Developer/projects/software-rasterizer.c/libs/raylib/src"
+    },
+    "cwd": "/Users/mfischbach/Developer/projects/software-rasterizer.c",
+    "preLaunchTask": "Build Release",
+    "noDebug": true
+  }
+]

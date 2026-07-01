@@ -1,0 +1,26 @@
+diff --git a/src/rcore.c b/src/rcore.c
+index f216a197..aa895de7 100644
+--- a/src/rcore.c
++++ b/src/rcore.c
+@@ -3599,8 +3599,19 @@ void SetupViewport(int width, int height)
+     // NOTE: We consider render size (scaled) and offset in case black bars are required and
+     // render area does not match full display area (this situation is only applicable on fullscreen mode)
+ #if defined(__APPLE__)
+-    Vector2 scale = GetWindowScaleDPI();
+-    rlViewport(CORE.Window.renderOffset.x/2*scale.x, CORE.Window.renderOffset.y/2*scale.y, (CORE.Window.render.width)*scale.x, (CORE.Window.render.height)*scale.y);
++    // DPI scaling in the viewport is only correct when the GL framebuffer is at physical resolution.
++    // Without FLAG_WINDOW_HIGHDPI, GLFW sets wantsBestResolutionOpenGLSurface=NO so the GL framebuffer
++    // is at logical resolution — multiplying by DPI makes the viewport larger than the framebuffer,
++    // causing only the bottom-left quadrant of the scene to be visible.
++    if ((CORE.Window.flags & FLAG_WINDOW_HIGHDPI) > 0)
++    {
++        Vector2 scale = GetWindowScaleDPI();
++        rlViewport(CORE.Window.renderOffset.x/2*scale.x, CORE.Window.renderOffset.y/2*scale.y, (CORE.Window.render.width)*scale.x, (CORE.Window.render.height)*scale.y);
++    }
++    else
++    {
++        rlViewport(CORE.Window.renderOffset.x/2, CORE.Window.renderOffset.y/2, CORE.Window.render.width, CORE.Window.render.height);
++    }
+ #else
+     rlViewport(CORE.Window.renderOffset.x/2, CORE.Window.renderOffset.y/2, CORE.Window.render.width, CORE.Window.render.height);
+ #endif
