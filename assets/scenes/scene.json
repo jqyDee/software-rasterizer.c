@@ -1,0 +1,82 @@
+{
+  "cam": { "pos": [1.0, 1.0, 1.0], "pitch": 0.0, "yaw": 0.0, "fov": 90.0 },
+  "instances": [
+    {
+      "mesh": "suzanne.obj",
+      "pos": [6.20108, 2.684304, 3.66173],
+      "rotation": [0.0, -89.970276, 0.0],
+      "scale": [0.50455, 0.50455, 0.50455],
+      "tex_path": ""
+    },
+    {
+      "mesh": "Sphere",
+      "pos": [6.308293, 1.126826, -4.747432],
+      "rotation": [0.0, 0.0, 0.0],
+      "scale": [1.0, 1.0, 1.0],
+      "tex_path": ""
+    },
+    {
+      "mesh": "Plane",
+      "pos": [0.0, -1.0, 0.0],
+      "rotation": [0.0, 0.0, 0.0],
+      "scale": [20.0, 1.0, 20.0],
+      "tex_path": "assets/textures/plank_flooring.jpg"
+    },
+    {
+      "mesh": "Cube",
+      "pos": [5.572961, -0.502756, -5.923614],
+      "rotation": [0.0, -44.972538, 0.0],
+      "scale": [5.843092, 1.0, 4.258021],
+      "tex_path": ""
+    },
+    {
+      "mesh": "suzanne.obj",
+      "pos": [4.145026, 1.349005, -6.749078],
+      "rotation": [0.0, -44.962849, 0.0],
+      "scale": [1.234563, 1.234563, 1.234563],
+      "tex_path": ""
+    },
+    {
+      "mesh": "Plane",
+      "pos": [9.997032, 2.503582, 0.0],
+      "rotation": [89.990295, 0.0, 90.010857],
+      "scale": [20.0, 1.0, 7.003685],
+      "tex_path": "assets/textures/broken_brick.png"
+    },
+    {
+      "mesh": "Plane",
+      "pos": [-9.999269, 2.501369, 0.0],
+      "rotation": [90.033707, 0.0, -90.049713],
+      "scale": [20.0, 1.0, 7.000322],
+      "tex_path": "assets/textures/broken_brick.png"
+    },
+    {
+      "mesh": "Plane",
+      "pos": [0.0, 2.502162, 10.004991],
+      "rotation": [89.986282, 180.0, 0.0],
+      "scale": [20.0, 1.0, 7.002249],
+      "tex_path": "assets/textures/broken_brick.png"
+    },
+    {
+      "mesh": "Plane",
+      "pos": [0.0, 5.996849, 0.0],
+      "rotation": [-180.0, 0.0, 0.0],
+      "scale": [20.0, 1.0, 20.0],
+      "tex_path": "assets/textures/broken_brick.png"
+    },
+    {
+      "mesh": "Torus",
+      "pos": [6.423881, 2.596124, 3.699129],
+      "rotation": [-90.032005, 89.989716, 0.0],
+      "scale": [4.300348, 4.300348, 4.300348],
+      "tex_path": "assets/textures/rock_wall.jpg"
+    },
+    {
+      "mesh": "Plane",
+      "pos": [0.0, 2.504994, -10.002563],
+      "rotation": [90.021706, 0.0, 0.0],
+      "scale": [20.0, 1.0, 7.000972],
+      "tex_path": "assets/textures/broken_brick.png"
+    }
+  ]
+}

@@ -1,20 +1,26 @@
+#include <engine/input.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 
 #include "raylib.h"
 
-#include "draw.h"
-#include "engine.h"
-#include "gui.h"
-#include "types.h"
-#include "update.h"
+#include "engine/instance.h"
+#include "engine/texture.h"
+#include "renderer/renderer.h"
+#include "ui/gui.h"
+
+#define TITLE "rasterizer.c"
+
+#define SCREEN_WIDTH 1000
+#define SCREEN_HEIGHT 800
 
 void *rasterizer(void *saved_state) {
   srand(time(NULL));
 
   SetConfigFlags(FLAG_WINDOW_RESIZABLE);
   InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, TITLE);
+  SetExitKey(KEY_NULL);
 
   int intended_w = SCREEN_WIDTH;
   int intended_h = SCREEN_HEIGHT;
@@ -25,76 +31,55 @@ void *rasterizer(void *saved_state) {
     intended_w = prev->renderer->display_width;
     intended_h = prev->renderer->display_height;
     SetWindowSize(intended_w, intended_h);
-    SetWindowPosition(prev->renderer->window_x, prev->renderer->window_y);
+    SetWindowPosition(prev->renderer->window_pos_x,
+                      prev->renderer->window_pos_y);
     skip_resize_events++;
   }
-
-  char *obj_paths[] = {
-      "./obj/cube.obj",
-      "./obj/Suzanne.obj",
-  };
-  size_t obj_count = sizeof(obj_paths) / sizeof(obj_paths[0]);
 
   world *world = saved_state;
   if (!world) {
     world = malloc(sizeof(struct world_s));
-    if (!init_world(world, obj_paths, obj_count, intended_w, intended_h)) {
+    if (!init_world(world, intended_w, intended_h)) {
       destroy_world(world);
       return 0;
     }
   } else {
     world->renderer->screen_texture = (Texture2D){0};
     resize_renderer_to(world, intended_w, intended_h);
-    if (!load_objs_files(world, obj_paths, obj_count)) {
+    load_texture_library(world);
+    if (!load_objs_files(world)) {
       destroy_world(world);
       return NULL;
     }
+    reload_instance_textures(world);
 
     printf("reloaded!\n");
   }
-
-#ifdef DEBUG
-  int count = 0;
-#endif
 
   while (!WindowShouldClose()) {
     BeginDrawing();
     {
       float delta_time = GetFrameTime();
 
-      if (IsKeyPressed(KEY_F3))
-        world->settings.show_debug_gui = !world->settings.show_debug_gui;
-
-      // SPECIAL COMMANDS
       switch (handle_user_input(world, delta_time)) {
-      case 0:
-        break;
-
-      case 1:
-        printf("reloading...\n");
-        world->renderer->window_x = GetWindowPosition().x;
-        world->renderer->window_y = GetWindowPosition().y;
+      case UIR_RELOAD_PLUGIN:
+        printf("INFO: reloading plugin\n");
+        world->renderer->window_pos_x = GetWindowPosition().x;
+        world->renderer->window_pos_y = GetWindowPosition().y;
+        EnableCursor();
         CloseWindow();
         return world;
-
-      case 2:
-        printf("resetting camera\n");
-        init_cam(world->cam);
+      case UIR_RESET_CAM_AND_POSITION:
+        printf("INFO:resetting camera and position\n");
+        init_cam(&world->game_cam);
+        world->debug_cam = world->game_cam;
+        world->cam = world->settings.show_debug_gui ? &world->debug_cam
+                                                    : &world->game_cam;
+        world->player_vy = 0.0f;
         break;
-
       default:
         break;
       }
-
-      rotate_mesh_around_origin(world->instances[0].mesh, 0.2f * delta_time,
-                                0.5f * delta_time);
-      rotate_mesh_around_origin(world->instances[1].mesh, 0.2f * delta_time,
-                                0.5f * delta_time);
-
-      ClearBackground(WHITE);
-
-      clear_framebuffer(world->renderer, WHITE);
-      clear_depthbuffer(world->renderer);
 
       if (IsWindowResized()) {
         if (skip_resize_events > 0)
@@ -103,22 +88,16 @@ void *rasterizer(void *saved_state) {
           resize_renderer(world);
       }
 
-      render_world(world);
-
-      UpdateTexture(world->renderer->screen_texture,
-                    world->renderer->framebuffer);
-
-      DrawTexturePro(world->renderer->screen_texture,
-                     (Rectangle){0, 0, world->renderer->screen_texture.width,
-                                 world->renderer->screen_texture.height},
-                     (Rectangle){0, 0, GetScreenWidth(), GetScreenHeight()},
-                     (Vector2){0, 0}, 0.0f, WHITE);
+      // this is not well named. This is right now the whole rendering pipeline
+      // in here basically xD
+      profile(world);
 
       draw_debug_gui(world, delta_time);
     }
     EndDrawing();
   }
 
+  EnableCursor();
   destroy_world(world);
   CloseWindow();
   return NULL;

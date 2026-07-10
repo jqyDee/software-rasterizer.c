@@ -1,6 +1,13 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+#ifdef STATIC_RELEASE
+
+extern void *rasterizer(void *);
+int main(void) { rasterizer(NULL); return 0; }
+
+#else
+
 #include <dlfcn.h>
 
 #if defined(__APPLE__)
@@ -36,3 +43,5 @@ int main(void) {
   }
   return 0;
 }
+
+#endif

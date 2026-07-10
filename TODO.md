@@ -41,6 +41,7 @@ cd libs/raylib && git apply ../../raylib-macos-viewport.patch
 
 ### Option C — Submit upstream PR to raylib (best long-term)
 
+
 The bug is genuine and affects all macOS users of raylib without `FLAG_WINDOW_HIGHDPI`.
 Open a PR at `https://github.com/raysan5/raylib` with the change in `src/rcore.c`.
 If merged: revert local patch, update submodule to a release that includes the fix,
