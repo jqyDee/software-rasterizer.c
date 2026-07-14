@@ -1,13 +1,15 @@
 #include "world.h"
 
-#include <stdlib.h>
+#include <math/vec.h>
+#include <renderer/lighting.h>
 #include <stdio.h>
+#include <stdlib.h>
 
-#include "engine/texture.h"
-#include "engine/instance.h"
-#include "engine/cam.h"
-#include "engine/scene.h"
 #include "assets/primitives.h"
+#include "engine/cam.h"
+#include "engine/instance.h"
+#include "engine/scene.h"
+#include "engine/texture.h"
 #include "raylib.h"
 
 bool init_world(world *world, int display_w, int display_h) {
@@ -18,6 +20,7 @@ bool init_world(world *world, int display_w, int display_h) {
 
   world->undo_len = 0;
   world->redo_len = 0;
+  world->perf = (perf_stats){0};
 
   init_cam(&world->game_cam);
   world->debug_cam = world->game_cam;
@@ -33,12 +36,14 @@ bool init_world(world *world, int display_w, int display_h) {
       .collision_enabled = true,
       .mouse_sensitivity = 0.003f,
       .move_speed = 5.0f,
-      .debug_cam_speed_factor = 2.0f,
+      .debug_cam_speed_factor = 3.0f,
       .gravity = 10.0f,
       .jump_speed = 5.0f,
       .ground_y = 0.0f,
       .camera_radius = 0.35f,
-      .seam_bias = 1.5f,
+      .seam_bias = 0.0f,
+      .ambient_light = 0.8f,
+      .lighting_mode = LIGHTING_GPU_PHONG,
   };
   world->selected_instance = -1;
   world->mesh_data = NULL;
@@ -48,6 +53,15 @@ bool init_world(world *world, int display_w, int display_h) {
   world->instance_capacity = 0;
   world->tex_lib = NULL;
   world->tex_lib_count = 0;
+
+  // TODO: add multiple light source and light source editing in the scene
+  // editor
+  world->lights[0] = (light_t){
+      .light_dir = vec_normalize(((vec3f){0.0f, 1.0f, 0.0f})),
+      .color = WHITE,
+      .intensity = 0.5f,
+  };
+  world->light_count = 1;
 
   resize_renderer_to(world, display_w, display_h);
   load_texture_library(world);

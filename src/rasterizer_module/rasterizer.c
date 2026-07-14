@@ -9,6 +9,7 @@
 #include "engine/texture.h"
 #include "renderer/renderer.h"
 #include "ui/gui.h"
+#include "engine/update.h"
 
 #define TITLE "rasterizer.c"
 
@@ -19,6 +20,9 @@ void *rasterizer(void *saved_state) {
   srand(time(NULL));
 
   SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+  // SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
+  // SetTargetFPS(60);
+
   InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, TITLE);
   SetExitKey(KEY_NULL);
 
@@ -61,7 +65,12 @@ void *rasterizer(void *saved_state) {
     {
       float delta_time = GetFrameTime();
 
-      switch (handle_user_input(world, delta_time)) {
+      double _input_t0 = GetTime();
+      user_input_response _uir = handle_user_input(world, delta_time);
+      perf_record(&world->perf.metrics[PERF_INPUT],
+                  (float)((GetTime() - _input_t0) * 1000.0));
+
+      switch (_uir) {
       case UIR_RELOAD_PLUGIN:
         printf("INFO: reloading plugin\n");
         world->renderer->window_pos_x = GetWindowPosition().x;
@@ -88,11 +97,19 @@ void *rasterizer(void *saved_state) {
           resize_renderer(world);
       }
 
+      double _update_t0 = GetTime();
+      update(world);
+      perf_record(&world->perf.metrics[PERF_UPDATE],
+                  (float)((GetTime() - _update_t0) * 1000.0));
+
       // this is not well named. This is right now the whole rendering pipeline
       // in here basically xD
       profile(world);
 
+      double _gui_t0 = GetTime();
       draw_debug_gui(world, delta_time);
+      perf_record(&world->perf.metrics[PERF_GUI],
+                  (float)((GetTime() - _gui_t0) * 1000.0));
     }
     EndDrawing();
   }

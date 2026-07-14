@@ -24,10 +24,10 @@ void setUp(void) {
 
 void tearDown(void) {}
 
-/* ---- clear_framebuffer: WHITE fast path (memset 0xFF) ---- */
+/* ---- clear_color_buffer: WHITE fast path (memset 0xFF) ---- */
 
 void test_clear_fb_white_first_pixel(void) {
-  clear_framebuffer(fb, W, H, COL_WHITE);
+  clear_color_buffer(fb, W, H, COL_WHITE);
   TEST_ASSERT_EQUAL_UINT8(255, fb[0].r);
   TEST_ASSERT_EQUAL_UINT8(255, fb[0].g);
   TEST_ASSERT_EQUAL_UINT8(255, fb[0].b);
@@ -35,36 +35,36 @@ void test_clear_fb_white_first_pixel(void) {
 }
 
 void test_clear_fb_white_last_pixel(void) {
-  clear_framebuffer(fb, W, H, COL_WHITE);
+  clear_color_buffer(fb, W, H, COL_WHITE);
   TEST_ASSERT_EQUAL_UINT8(255, fb[N - 1].r);
   TEST_ASSERT_EQUAL_UINT8(255, fb[N - 1].g);
 }
 
 void test_clear_fb_white_no_overflow(void) {
-  clear_framebuffer(fb, W, H, COL_WHITE);
+  clear_color_buffer(fb, W, H, COL_WHITE);
   /* sentinel bytes after the N-pixel region must still be 0xAB */
   uint8_t *guard = (uint8_t *)&fb[N];
   TEST_ASSERT_EQUAL_UINT8(0xAB, guard[0]);
   TEST_ASSERT_EQUAL_UINT8(0xAB, guard[1]);
 }
 
-/* ---- clear_framebuffer: non-white slow path (loop) ---- */
+/* ---- clear_color_buffer: non-white slow path (loop) ---- */
 
 void test_clear_fb_color_first_pixel(void) {
-  clear_framebuffer(fb, W, H, COL_RED);
+  clear_color_buffer(fb, W, H, COL_RED);
   TEST_ASSERT_EQUAL_UINT8(255, fb[0].r);
   TEST_ASSERT_EQUAL_UINT8(0, fb[0].g);
   TEST_ASSERT_EQUAL_UINT8(0, fb[0].b);
 }
 
 void test_clear_fb_color_last_pixel(void) {
-  clear_framebuffer(fb, W, H, COL_RED);
+  clear_color_buffer(fb, W, H, COL_RED);
   TEST_ASSERT_EQUAL_UINT8(255, fb[N - 1].r);
   TEST_ASSERT_EQUAL_UINT8(0, fb[N - 1].g);
 }
 
 void test_clear_fb_color_no_overflow(void) {
-  clear_framebuffer(fb, W, H, COL_RED);
+  clear_color_buffer(fb, W, H, COL_RED);
   uint8_t *guard = (uint8_t *)&fb[N];
   TEST_ASSERT_EQUAL_UINT8(0xAB, guard[0]);
   TEST_ASSERT_EQUAL_UINT8(0xAB, guard[1]);
@@ -72,7 +72,7 @@ void test_clear_fb_color_no_overflow(void) {
 
 void test_clear_fb_arbitrary_color(void) {
   /* teal is not white, so it hits the loop path; verify all channels */
-  clear_framebuffer(fb, W, H, COL_TEAL);
+  clear_color_buffer(fb, W, H, COL_TEAL);
   TEST_ASSERT_EQUAL_UINT8(0, fb[0].r);
   TEST_ASSERT_EQUAL_UINT8(128, fb[0].g);
   TEST_ASSERT_EQUAL_UINT8(128, fb[0].b);

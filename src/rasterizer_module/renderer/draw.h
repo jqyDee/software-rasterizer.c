@@ -3,8 +3,10 @@
 #include "../world.h"
 #include "raylib.h"
 
-void draw_triangle_pixels_tiled(float *depthbuffer, Color *framebuffer,
-                                int *idbuffer, int screen_width,
+void draw_triangle_pixels_tiled(depthbuffer *depthbuffer,
+                                framebuffer *framebuffer, idbuffer *idbuffer,
+                                albedobuffer *albedobuffer,
+                                normalbuffer *normalbuffer, int screen_width,
                                 const screen_tri_t *st, int clip_x0,
                                 int clip_y0, int clip_x1, int clip_y1);
 

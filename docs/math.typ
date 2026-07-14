@@ -797,6 +797,232 @@ edges between them. Smooth shading (Gouraud/Phong) fixes this but requires
 per-vertex normals, which the current non-indexed `mesh_s` layout does not
 store.
 
+== Per-Pixel (Phong) Lighting
+
+The flat-shading limitation above — visible facets on curved meshes — is
+fixed by shading *per pixel* instead of per triangle. This needs a normal at
+every pixel, not just one per face. Rather than adding a per-vertex normal
+buffer to the rasterizer's hot loop, this path takes a different route: build
+the normals (and colors) as *images* on the CPU during rasterization, then
+let the GPU do the lighting math per pixel in a fragment shader.
+
+=== Deferred G-Buffers
+
+Two off-screen buffers are filled during rasterization, one per pixel, using
+the exact same barycentric interpolation as any other per-pixel attribute:
+
+- `albedobuffer` — unlit surface color (texture sample or flat color)
+- `normalbuffer` — interpolated, renormalized surface normal, *encoded* as a
+  color
+
+A `Color` channel only holds $[0, 255]$, but a normal component is
+$[-1, 1]$, so the normal is remapped before storage:
+
+$
+  "encoded" = (n times 0.5 + 0.5) times 255
+$
+
+```c
+// from draw_triangle_pixels_tiled() in renderer/draw.c
+normalbuffer[pixel_idx] = (Color){
+  (unsigned char)((n.x * 0.5f + 0.5f) * 255.0f),
+  (unsigned char)((n.y * 0.5f + 0.5f) * 255.0f),
+  (unsigned char)((n.z * 0.5f + 0.5f) * 255.0f),
+  255,
+};
+```
+
+Both buffers are uploaded as GPU textures once per frame (`UpdateTexture`),
+then a single full-screen quad draw runs `phong.fs`, which decodes the
+normal back to $[-1, 1]$:
+
+```glsl
+// assets/shaders/phong.fs
+vec3 n = normalize(texture(normalMap, fragTexCoord).rgb * 2.0 - 1.0);
+```
+
+=== Lighting Formula
+
+Per pixel, the same Lambertian sum used in flat shading is evaluated once per
+pixel instead of once per triangle, and now genuinely summed over *every*
+light instead of being folded into a single scalar at packaging time:
+
+$
+  I = k_a + sum_i C_i dot I_i dot max(0, hat(n) dot hat(l)_i)
+$
+
+- $k_a$ — ambient floor (`ambient` uniform)
+- $C_i$, $I_i$, $hat(l)_i$ — color, intensity, camera-space direction of
+  light $i$
+- $hat(n)$ — the *decoded, per-pixel* normal, not a per-triangle constant
+
+```glsl
+// assets/shaders/phong.fs
+vec3 lit = vec3(ambient);
+for (int i = 0; i < lightCount; i++) {
+    float ndotl = max(0.0, dot(n, lightDirs[i]));
+    lit += lightColors[i] * lightIntensities[i] * ndotl;
+}
+finalColor = vec4(albedo * lit, 1.0);
+```
+
+*Not full Phong:* despite the name (`LIGHTING_GPU_PHONG`), there is no
+specular term — this is per-pixel diffuse + ambient only. "Phong" here refers
+to the *technique lineage* (per-pixel shading via interpolated normals, as
+opposed to Gouraud's per-vertex color interpolation or the flat per-face
+shading above), not the full Blinn-Phong reflectance model.
+
+*Why the G-buffer split, not just per-vertex normals:* lighting happens in a
+fragment shader operating on a flat full-screen quad — it has no knowledge of
+triangles, vertices, or barycentric coordinates at all. Every value the
+shader needs (albedo, normal) has to already be a per-pixel image by the
+time the shader runs; the CPU rasterizer is what produces those images.
+
+= Shadow Mapping
+
+Shadows are computed only for the GPU/Phong lighting path
+(`LIGHTING_GPU_PHONG`), and only from a single light, `world->lights[0]`. The
+approach: render the scene's depth from the light's point of view into a
+second, small depth buffer, then test each surface point against it — a
+point further from the light than whatever is already recorded at its texel
+is occluded.
+
+== Light Basis (Orthographic)
+
+The shadow-casting light is directional, not positional — it has no origin,
+only `light_dir`. There is no perspective camera to build; instead an
+*orthographic* basis is constructed directly from the light's direction, with
+no matrix library, following the same "rotate/cross only what you need" style
+as the rest of this codebase:
+
+$
+  hat(f) = -hat(l), quad
+  hat(r) = "normalize"(hat(u)_"hint" times hat(f)), quad
+  hat(u) = hat(f) times hat(r)
+$
+
+$hat(f)$ points *from* the light *toward* the scene (opposite `light_dir`,
+which points toward the light, matching Lambert's $hat(l)$ convention).
+$hat(u)_"hint"$ is $(0,0,1)$ when $hat(f)$ is nearly vertical (avoids a
+degenerate cross product), otherwise $(0,1,0)$.
+
+```c
+// from compute_shadow_light_basis() in renderer/lighting.c
+vec3f fwd = vec_scale(vec_normalize(world->lights[0].light_dir), -1.0f);
+vec3f up_hint = (fabsf(fwd.y) > 0.99f) ? (vec3f){0, 0, 1} : (vec3f){0, 1, 0};
+vec3f right = vec_normalize(vec_cross(up_hint, fwd));
+vec3f up = vec3f_cross(fwd, right);
+```
+
+Because $hat(r) perp hat(f)$ (cross product) and both are unit length,
+$hat(u) = hat(f) times hat(r)$ is unit length automatically — no
+renormalization needed.
+
+== Light-Space Projection
+
+Unlike the camera's perspective projection, this is *orthographic* — no
+division by depth, just a linear remap of a fixed world-space box onto the
+shadow map:
+
+$
+  l_x = bold(p) dot hat(r), quad l_y = bold(p) dot hat(u), quad l_z = bold(p) dot hat(f)
+$
+$
+  s_x = (l_x / E + 1) dot 0.5 dot S, quad
+  s_y = (1 - l_y / E) dot 0.5 dot S
+$
+
+where $E$ is `SHADOW_ORTHO_HALF_EXTENT` (world-space half-size of the light's
+view box) and $S$ is `SHADOW_MAP_SIZE`. Depth is stored as *closeness*,
+$-l_z$, so that — like the camera's $1/z$ — larger means closer to the
+light:
+
+```c
+// from world_to_light_screen() in renderer/geometry.c
+*sx = (lx / SHADOW_ORTHO_HALF_EXTENT + 1.0f) * 0.5f * SHADOW_MAP_SIZE;
+*sy = (1.0f - ly / SHADOW_ORTHO_HALF_EXTENT) * 0.5f * SHADOW_MAP_SIZE;
+*closeness = -lz;
+```
+
+*Sentinel value:* the camera's depth buffer clears to `0`, valid because
+$1/z$ is always positive. `closeness` is a *signed* quantity — it can be
+negative depending on which side of the world origin a point falls, since
+the projection has no fixed "light position," only a direction. Clearing to
+`0` would make any negative-closeness geometry lose every depth test and
+never get recorded. The shadow depth buffer clears to `-FLT_MAX` instead.
+
+== Depth-Only Pass
+
+A second, full scene rasterization runs before the main render, reusing
+`draw_triangle_pixels_tiled` with every buffer except depth set to `NULL` —
+the existing `if (framebuffer)` guard means no color/texture work happens at
+all, only the depth test and write:
+
+```c
+// from draw_shadow_map() in renderer/geometry.c
+draw_triangle_pixels_tiled(r->shadow_depthbuffer, NULL, NULL, NULL, NULL,
+                            SHADOW_MAP_SIZE, &st, 0, 0,
+                            SHADOW_MAP_SIZE - 1, SHADOW_MAP_SIZE - 1);
+```
+
+This pass is currently single-threaded — unlike the main render's
+tile-parallel path, it does not yet bin triangles into tiles for
+`#pragma omp parallel for`, which is why enabling shadows roughly doubles
+frame time.
+
+== Sampling and Bias
+
+Each *vertex* (not each pixel — see limitation below) is tested against the
+shadow map once, in `build_screen_tris`, using the light-space projection
+above:
+
+$
+  "shadow" = cases(
+    "SHADOW_DARKNESS" & "if" "closeness" < "stored" - "bias",
+    1.0 & "otherwise"
+  )
+$
+
+```c
+// from sample_shadow() in renderer/lighting.c
+float stored = renderer->shadow_depthbuffer[iy * SHADOW_MAP_SIZE + ix];
+return (closeness < stored - SHADOW_BIAS) ? SHADOW_DARKNESS : 1.0f;
+```
+
+`SHADOW_BIAS` exists for the same reason `fp_bias` exists in rasterization: a
+surface point sampling its own recorded depth should not shadow itself. Too
+small a bias causes self-shadowing acne; too large causes shadows to
+visibly detach from their caster ("peter-panning").
+
+The three per-vertex results are stored on `screen_tri_t.shadow[3]` and
+interpolated barycentrically, *perspective-correct* (multiplied through
+`inv_z` like UV coordinates) — not screen-space-linear, which would make the
+visible shadow boundary shift within a triangle as the camera moves, since
+screen-space-linear interpolation of a world-space quantity is only exact
+for a triangle viewed head-on.
+
+*Clipping interaction:* shadow values must survive near-plane clipping
+(`clip_triangle_near_plane_uv`) the same way UVs and normals do. A triangle
+straddling the near plane is re-triangulated into a clipped quad with new,
+interpolated vertices — if the shadow factor were left keyed to the
+original, pre-clip vertex order, it would end up attached to the wrong
+geometry whenever clipping topology changed, which happens as the camera
+moves near a large surface. `shadow_in`/`out_shadow` are threaded through the
+clip function with the same `clip_t` as position/UV/normal for exactly this
+reason.
+
+== Known Limitations
+
+- *Per-vertex, not per-pixel:* three samples per triangle is coarse on
+  large, minimally-triangulated surfaces — the `Plane` primitive used for
+  the floor and every wall is only two triangles, so each one's shadow state
+  is effectively a single flat value, producing visible seams at shared
+  edges between differently-lit triangles.
+- *Single light:* only `world->lights[0]` casts a shadow; baking the result
+  into `albedobuffer` before the Phong pass also means it darkens *every*
+  light's contribution uniformly, not just the shadow-casting light's.
+- *CPU-only, single-threaded:* see the Depth-Only Pass section above.
+
 = Tile-Based Rendering
 
 The screen is divided into fixed-size tiles (`TILE_SIZE` × `TILE_SIZE` pixels). Instead

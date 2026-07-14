@@ -1,20 +1,27 @@
 #include "../../renderer/geometry.h"
+#include "../../renderer/tiling.h"
 #include "../unity.h"
 #include <string.h>
 
 extern void package_screen_tri(screen_tri_t *screen_triangle,
                                const vec3f proj[3], const vec2f uvs[3],
+                               const vec3f normals[3],
                                const mesh_instance *instance,
                                const bool has_tex, const Color flat_color,
-                               const int instance_id, const int bx0,
-                               const int bx1, const int by0, const int by1);
+                               const vec3f light_rgb, const int instance_id,
+                               const int bx0, const int bx1, const int by0,
+                               const int by1, const float st_shadow[3]);
 extern bool area_collapsed(const vec3f proj[3]);
 extern bool edge_collapsed(const vec3f proj[3]);
 extern bool bbox_collapsed(const int *bx0, const int *bx1,
                                   const int *by0, const int *by1);
 extern int clip_triangle_near_plane_uv(const vec3f verts[3],
-                                       const vec2f uvs_in[3], float near,
-                                       vec3f out_pos[4], vec2f out_uvs[4]);
+                                       const vec2f uvs_in[3],
+                                       const vec3f normals_in[3],
+                                       const float shadow_in[3], float near,
+                                       vec3f out_pos[4], vec2f out_uvs[4],
+                                       vec3f out_normals[4],
+                                       float out_shadow[4]);
 extern void compute_bbox(const vec3f proj[3], const int screen_width,
                          const int screen_height, int *bx0, int *bx1, int *by0,
                          int *by1);
@@ -33,54 +40,89 @@ void tearDown(void) {}
 void test_clip_all_behind_returns_zero(void) {
   vec3f verts[3] = {{0, 0, 0.5f}, {1, 0, 0.5f}, {0, 1, 0.5f}};
   vec2f uvs[3] = {{0, 0}, {1, 0}, {0, 1}};
+  vec3f normals[3] = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
   vec3f out_pos[4];
   vec2f out_uvs[4];
-  int n = clip_triangle_near_plane_uv(verts, uvs, 1.0f, out_pos, out_uvs);
+  vec3f out_normals[4];
+  float shadow[3] = {1.0f, 1.0f, 1.0f};
+  float out_shadow[4];
+  int n = clip_triangle_near_plane_uv(verts, uvs, normals, shadow, 1.0f,
+                                      out_pos, out_uvs, out_normals,
+                                      out_shadow);
   TEST_ASSERT_EQUAL_INT(0, n);
 }
 
 void test_clip_all_in_front_returns_three(void) {
   vec3f verts[3] = {{0, 0, 2.0f}, {1, 0, 2.0f}, {0, 1, 2.0f}};
   vec2f uvs[3] = {{0, 0}, {1, 0}, {0, 1}};
+  vec3f normals[3] = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
   vec3f out_pos[4];
   vec2f out_uvs[4];
-  int n = clip_triangle_near_plane_uv(verts, uvs, 1.0f, out_pos, out_uvs);
+  vec3f out_normals[4];
+  float shadow[3] = {1.0f, 1.0f, 1.0f};
+  float out_shadow[4];
+  int n = clip_triangle_near_plane_uv(verts, uvs, normals, shadow, 1.0f,
+                                      out_pos, out_uvs, out_normals,
+                                      out_shadow);
   TEST_ASSERT_EQUAL_INT(3, n);
 }
 
 void test_clip_one_behind_returns_four(void) {
   vec3f verts[3] = {{0, 0, 0.5f}, {1, 0, 2.0f}, {0, 1, 2.0f}};
   vec2f uvs[3] = {{0, 0}, {1, 0}, {0, 1}};
+  vec3f normals[3] = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
   vec3f out_pos[4];
   vec2f out_uvs[4];
-  int n = clip_triangle_near_plane_uv(verts, uvs, 1.0f, out_pos, out_uvs);
+  vec3f out_normals[4];
+  float shadow[3] = {1.0f, 1.0f, 1.0f};
+  float out_shadow[4];
+  int n = clip_triangle_near_plane_uv(verts, uvs, normals, shadow, 1.0f,
+                                      out_pos, out_uvs, out_normals,
+                                      out_shadow);
   TEST_ASSERT_EQUAL_INT(4, n);
 }
 
 void test_clip_two_behind_returns_three(void) {
   vec3f verts[3] = {{0, 0, 0.5f}, {1, 0, 0.5f}, {0, 1, 2.0f}};
   vec2f uvs[3] = {{0, 0}, {1, 0}, {0, 1}};
+  vec3f normals[3] = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
   vec3f out_pos[4];
   vec2f out_uvs[4];
-  int n = clip_triangle_near_plane_uv(verts, uvs, 1.0f, out_pos, out_uvs);
+  vec3f out_normals[4];
+  float shadow[3] = {1.0f, 1.0f, 1.0f};
+  float out_shadow[4];
+  int n = clip_triangle_near_plane_uv(verts, uvs, normals, shadow, 1.0f,
+                                      out_pos, out_uvs, out_normals,
+                                      out_shadow);
   TEST_ASSERT_EQUAL_INT(3, n);
 }
 
 void test_clip_clipped_vertex_is_at_near_plane(void) {
   vec3f verts[3] = {{0, 0, 0.5f}, {2, 0, 2.0f}, {0, 2, 2.0f}};
   vec2f uvs[3] = {{0, 0}, {1, 0}, {0, 1}};
+  vec3f normals[3] = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
   vec3f out_pos[4];
   vec2f out_uvs[4];
-  clip_triangle_near_plane_uv(verts, uvs, 1.0f, out_pos, out_uvs);
+  vec3f out_normals[4];
+  float shadow[3] = {1.0f, 1.0f, 1.0f};
+  float out_shadow[4];
+  clip_triangle_near_plane_uv(verts, uvs, normals, shadow, 1.0f, out_pos,
+                              out_uvs, out_normals, out_shadow);
   TEST_ASSERT_FLOAT_WITHIN(1e-5f, 1.0f, out_pos[0].z);
 }
 
 void test_clip_all_outputs_in_front_of_near(void) {
   vec3f verts[3] = {{0, 0, 0.5f}, {2, 0, 2.0f}, {0, 2, 2.0f}};
   vec2f uvs[3] = {{0, 0}, {1, 0}, {0, 1}};
+  vec3f normals[3] = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
   vec3f out_pos[4];
   vec2f out_uvs[4];
-  int n = clip_triangle_near_plane_uv(verts, uvs, 1.0f, out_pos, out_uvs);
+  vec3f out_normals[4];
+  float shadow[3] = {1.0f, 1.0f, 1.0f};
+  float out_shadow[4];
+  int n = clip_triangle_near_plane_uv(verts, uvs, normals, shadow, 1.0f,
+                                      out_pos, out_uvs, out_normals,
+                                      out_shadow);
   for (int i = 0; i < n; i++)
     TEST_ASSERT_TRUE(out_pos[i].z >= 1.0f - 1e-5f);
 }
@@ -91,9 +133,15 @@ void test_clip_uv_lerped_at_clip_point(void) {
    */
   vec3f verts[3] = {{0, 0, 0.0f}, {3, 0, 3.0f}, {0, 3, 3.0f}};
   vec2f uvs[3] = {{0, 0}, {1, 0}, {0, 1}};
+  vec3f normals[3] = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
   vec3f out_pos[4];
   vec2f out_uvs[4];
-  int n = clip_triangle_near_plane_uv(verts, uvs, 1.0f, out_pos, out_uvs);
+  vec3f out_normals[4];
+  float shadow[3] = {1.0f, 1.0f, 1.0f};
+  float out_shadow[4];
+  int n = clip_triangle_near_plane_uv(verts, uvs, normals, shadow, 1.0f,
+                                      out_pos, out_uvs, out_normals,
+                                      out_shadow);
   TEST_ASSERT_EQUAL_INT(4, n);
   /* find the clipped vertex on the v0→v1 edge (z=1, y≈0) */
   int found = 0;
@@ -106,18 +154,60 @@ void test_clip_uv_lerped_at_clip_point(void) {
   TEST_ASSERT_TRUE(found);
 }
 
+void test_clip_normal_lerped_at_clip_point(void) {
+  /* both endpoints share the same normal (a flat face) — a lerp must return
+     that same normal at the clip point. This is a regression test: a buggy
+     interpolation that multiplies instead of adds collapses to (0,0,0) here,
+     since (n_curr - n_prev) is zero when both endpoints match. */
+  vec3f verts[3] = {{0, 0, 0.0f}, {3, 0, 3.0f}, {0, 3, 3.0f}};
+  vec2f uvs[3] = {{0, 0}, {1, 0}, {0, 1}};
+  vec3f normals[3] = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
+  vec3f out_pos[4];
+  vec2f out_uvs[4];
+  vec3f out_normals[4];
+  float shadow[3] = {1.0f, 1.0f, 1.0f};
+  float out_shadow[4];
+  int n = clip_triangle_near_plane_uv(verts, uvs, normals, shadow, 1.0f,
+                                      out_pos, out_uvs, out_normals,
+                                      out_shadow);
+  int found = 0;
+  for (int i = 0; i < n; i++) {
+    if (fabsf(out_pos[i].z - 1.0f) < 1e-4f && fabsf(out_pos[i].y) < 1e-4f) {
+      TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.0f, out_normals[i].x);
+      TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.0f, out_normals[i].y);
+      TEST_ASSERT_FLOAT_WITHIN(1e-4f, 1.0f, out_normals[i].z);
+      found = 1;
+    }
+  }
+  TEST_ASSERT_TRUE(found);
+}
+
 /* ---- is_backfacing ---- */
 
 void test_is_backfacing_true_for_away_facing(void) {
   /* normal = +Z, view_dir = -Z → dot < 0 → backfacing */
   vec3f verts[3] = {{-1, 0, 5}, {1, 0, 5}, {0, 1, 5}};
-  TEST_ASSERT_TRUE(is_backfacing(verts));
+  vec3f normal = {0, 0, 1};
+  TEST_ASSERT_TRUE(is_backfacing(verts, normal));
 }
 
 void test_is_backfacing_false_for_front_facing(void) {
   /* normal = -Z, view_dir = -Z → dot > 0 → front facing */
   vec3f verts[3] = {{1, 0, 5}, {-1, 0, 5}, {0, 1, 5}};
-  TEST_ASSERT_FALSE(is_backfacing(verts));
+  vec3f normal = {0, 0, -1};
+  TEST_ASSERT_FALSE(is_backfacing(verts, normal));
+}
+
+/* ---- compute_face_normal ---- */
+
+void test_compute_face_normal_matches_expected_axis(void) {
+  /* CCW-in-screen-space triangle in the z=5 plane should produce a normal
+     purely along +/-Z */
+  vec3f verts[3] = {{-1, 0, 5}, {1, 0, 5}, {0, 1, 5}};
+  vec3f normal = compute_face_normal(verts);
+  TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.0f, normal.x);
+  TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.0f, normal.y);
+  TEST_ASSERT_FLOAT_WITHIN(1e-4f, 1.0f, fabsf(normal.z));
 }
 
 /* ---- compute_bbox ---- */
@@ -372,11 +462,15 @@ void test_bin_two_tris_correct_slots(void) {
 void test_package_positions_and_inv_z(void) {
   vec3f proj[3] = {{1, 2, 4.0f}, {3, 4, 2.0f}, {5, 6, 1.0f}};
   vec2f uvs[3] = {{0, 0}, {1, 0}, {0, 1}};
+  vec3f normals[3] = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
   mesh_instance inst;
   memset(&inst, 0, sizeof(inst));
   Color col = {255, 0, 0, 255};
+  vec3f light_rgb = {1, 1, 1};
   screen_tri_t st;
-  package_screen_tri(&st, proj, uvs, &inst, false, col, 0, 0, 10, 0, 10);
+  float shadow[3] = {1.0f, 1.0f, 1.0f};
+  package_screen_tri(&st, proj, uvs, normals, &inst, false, col, light_rgb, 0,
+                     0, 10, 0, 10, shadow);
   TEST_ASSERT_FLOAT_WITHIN(1e-5f, 1.0f, st.v[0].x);
   TEST_ASSERT_FLOAT_WITHIN(1e-5f, 4.0f, st.v[0].z);
   TEST_ASSERT_FLOAT_WITHIN(1e-5f, 0.25f, st.inv_z[0]); /* 1/4 */
@@ -387,20 +481,42 @@ void test_package_positions_and_inv_z(void) {
 void test_package_uvs_copied(void) {
   vec3f proj[3] = {{0, 0, 2.0f}, {1, 0, 2.0f}, {0, 1, 2.0f}};
   vec2f uvs[3] = {{0.1f, 0.2f}, {0.3f, 0.4f}, {0.5f, 0.6f}};
+  vec3f normals[3] = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
   mesh_instance inst;
   memset(&inst, 0, sizeof(inst));
   Color col = {0, 0, 0, 255};
+  vec3f light_rgb = {1, 1, 1};
   screen_tri_t st;
-  package_screen_tri(&st, proj, uvs, &inst, false, col, 0, 0, 10, 0, 10);
+  float shadow[3] = {1.0f, 1.0f, 1.0f};
+  package_screen_tri(&st, proj, uvs, normals, &inst, false, col, light_rgb, 0,
+                     0, 10, 0, 10, shadow);
   TEST_ASSERT_FLOAT_WITHIN(1e-5f, 0.1f, st.uv[0].x);
   TEST_ASSERT_FLOAT_WITHIN(1e-5f, 0.2f, st.uv[0].y);
   TEST_ASSERT_FLOAT_WITHIN(1e-5f, 0.5f, st.uv[2].x);
   TEST_ASSERT_FLOAT_WITHIN(1e-5f, 0.6f, st.uv[2].y);
 }
 
+void test_package_normals_copied(void) {
+  vec3f proj[3] = {{0, 0, 2.0f}, {1, 0, 2.0f}, {0, 1, 2.0f}};
+  vec2f uvs[3] = {0};
+  vec3f normals[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+  mesh_instance inst;
+  memset(&inst, 0, sizeof(inst));
+  Color col = {0, 0, 0, 255};
+  vec3f light_rgb = {1, 1, 1};
+  screen_tri_t st;
+  float shadow[3] = {1.0f, 1.0f, 1.0f};
+  package_screen_tri(&st, proj, uvs, normals, &inst, false, col, light_rgb, 0,
+                     0, 10, 0, 10, shadow);
+  TEST_ASSERT_FLOAT_WITHIN(1e-5f, 1.0f, st.normals[0].x);
+  TEST_ASSERT_FLOAT_WITHIN(1e-5f, 1.0f, st.normals[1].y);
+  TEST_ASSERT_FLOAT_WITHIN(1e-5f, 1.0f, st.normals[2].z);
+}
+
 void test_package_has_tex_false_sets_null(void) {
   vec3f proj[3] = {{0, 0, 2.0f}, {1, 0, 2.0f}, {0, 1, 2.0f}};
   vec2f uvs[3] = {0};
+  vec3f normals[3] = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
   Color pixels[4];
   mesh_instance inst;
   memset(&inst, 0, sizeof(inst));
@@ -408,14 +524,18 @@ void test_package_has_tex_false_sets_null(void) {
   inst.tex_w = 2;
   inst.tex_h = 2;
   Color col = {0, 0, 0, 255};
+  vec3f light_rgb = {1, 1, 1};
   screen_tri_t st;
-  package_screen_tri(&st, proj, uvs, &inst, false, col, 0, 0, 10, 0, 10);
+  float shadow[3] = {1.0f, 1.0f, 1.0f};
+  package_screen_tri(&st, proj, uvs, normals, &inst, false, col, light_rgb, 0,
+                     0, 10, 0, 10, shadow);
   TEST_ASSERT_NULL(st.tex);
 }
 
 void test_package_has_tex_true_sets_ptr(void) {
   vec3f proj[3] = {{0, 0, 2.0f}, {1, 0, 2.0f}, {0, 1, 2.0f}};
   vec2f uvs[3] = {0};
+  vec3f normals[3] = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
   Color pixels[4];
   mesh_instance inst;
   memset(&inst, 0, sizeof(inst));
@@ -423,8 +543,11 @@ void test_package_has_tex_true_sets_ptr(void) {
   inst.tex_w = 2;
   inst.tex_h = 2;
   Color col = {0, 0, 0, 255};
+  vec3f light_rgb = {1, 1, 1};
   screen_tri_t st;
-  package_screen_tri(&st, proj, uvs, &inst, true, col, 0, 0, 10, 0, 10);
+  float shadow[3] = {1.0f, 1.0f, 1.0f};
+  package_screen_tri(&st, proj, uvs, normals, &inst, true, col, light_rgb, 0,
+                     0, 10, 0, 10, shadow);
   TEST_ASSERT_EQUAL_PTR(pixels, st.tex);
   TEST_ASSERT_EQUAL_INT(2, st.tex_w);
   TEST_ASSERT_EQUAL_INT(2, st.tex_h);
@@ -433,11 +556,15 @@ void test_package_has_tex_true_sets_ptr(void) {
 void test_package_bbox_and_metadata(void) {
   vec3f proj[3] = {{0, 0, 2.0f}, {1, 0, 2.0f}, {0, 1, 2.0f}};
   vec2f uvs[3] = {0};
+  vec3f normals[3] = {{0, 0, 1}, {0, 0, 1}, {0, 0, 1}};
   mesh_instance inst;
   memset(&inst, 0, sizeof(inst));
   Color col = {7, 8, 9, 255};
+  vec3f light_rgb = {1, 1, 1};
   screen_tri_t st;
-  package_screen_tri(&st, proj, uvs, &inst, false, col, 42, 5, 15, 10, 20);
+  float shadow[3] = {1.0f, 1.0f, 1.0f};
+  package_screen_tri(&st, proj, uvs, normals, &inst, false, col, light_rgb,
+                     42, 5, 15, 10, 20, shadow);
   TEST_ASSERT_EQUAL_INT(42, st.instance_id);
   TEST_ASSERT_EQUAL_INT(5,  st.bx0);
   TEST_ASSERT_EQUAL_INT(15, st.bx1);
@@ -456,8 +583,10 @@ int main(void) {
   RUN_TEST(test_clip_clipped_vertex_is_at_near_plane);
   RUN_TEST(test_clip_all_outputs_in_front_of_near);
   RUN_TEST(test_clip_uv_lerped_at_clip_point);
+  RUN_TEST(test_clip_normal_lerped_at_clip_point);
   RUN_TEST(test_is_backfacing_true_for_away_facing);
   RUN_TEST(test_is_backfacing_false_for_front_facing);
+  RUN_TEST(test_compute_face_normal_matches_expected_axis);
   RUN_TEST(test_compute_bbox_basic);
   RUN_TEST(test_compute_bbox_clamped_to_screen);
   RUN_TEST(test_bbox_collapsed_zero_width);
@@ -486,6 +615,7 @@ int main(void) {
   RUN_TEST(test_bin_two_tris_correct_slots);
   RUN_TEST(test_package_positions_and_inv_z);
   RUN_TEST(test_package_uvs_copied);
+  RUN_TEST(test_package_normals_copied);
   RUN_TEST(test_package_has_tex_false_sets_null);
   RUN_TEST(test_package_has_tex_true_sets_ptr);
   RUN_TEST(test_package_bbox_and_metadata);

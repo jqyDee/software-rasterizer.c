@@ -38,3 +38,12 @@ Color hsv_to_rgb(float h, float s, float v) {
                  (unsigned char)((b + m) * 255), 255};
   return color;
 }
+
+Color color_scale(Color base, vec3f light_rgb) {
+  return (Color){
+    (unsigned char)fminf(255.0f, base.r * light_rgb.x),
+    (unsigned char)fminf(255.0f, base.g * light_rgb.y),
+    (unsigned char)fminf(255.0f, base.b * light_rgb.z),
+    base.a,
+  };
+}

@@ -304,8 +304,8 @@ void draw_debug_gui(world *world, float delta_time) {
   {
     const float MAIN_C =
         PAD + ROW_H + GAP + ROW_H + GAP + ROW_H + GAP + ROW_H + PAD;
-    const float STATS_C = PAD + 7.0f * ROW_H + PAD;
-    const float REND_C = PAD + 5.0f * ROW_H + PAD;
+    const float STATS_C = PAD + 8.0f * ROW_H + PAD;
+    const float REND_C = PAD + 6.0f * ROW_H + PAD;
     const float CAM_C = PAD + 6.0f * ROW_H + PAD;
     const float PHYS_C = PAD + 4.0f * ROW_H + PAD;
     float scene_c = PAD + 2.0f * ROW_H + GAP +
@@ -382,18 +382,32 @@ void draw_debug_gui(world *world, float delta_time) {
   }
 
   /* ── Stats ─────────────────────────────────────────────────── */
-  const float STATS_W = 270.0f;
-  const float STATS_CONTENT = PAD + 7.0f * ROW_H + PAD;
+  const float STATS_W = 340.0f;
+  const float STATS_CONTENT = PAD + 11.0f * ROW_H + PAD;
 
   if (do_window(&stats_win, "Stats", STATS_W, STATS_CONTENT)) {
     float x = stats_win.pos.x + PAD;
     float y = stats_win.pos.y + TITLE_H + PAD;
     float aw = STATS_W - PAD * 2.0f;
-    char buf[80];
+    char buf[96];
 
-    snprintf(buf, sizeof(buf), "FPS: %d   frametime: %.2f ms",
-             delta_time > 0.0f ? (int)(1.0f / delta_time) : 0,
-             delta_time * 1000.0f);
+    perf_metric_t *frametime = &world->perf.metrics[PERF_FRAMETIME];
+    perf_metric_t *clear = &world->perf.metrics[PERF_CLEAR];
+    perf_metric_t *render = &world->perf.metrics[PERF_RENDER];
+    perf_metric_t *upload = &world->perf.metrics[PERF_UPLOAD];
+    perf_metric_t *uniform = &world->perf.metrics[PERF_UNIFORM];
+    perf_metric_t *shading = &world->perf.metrics[PERF_SHADING];
+    perf_metric_t *pupdate = &world->perf.metrics[PERF_UPDATE];
+    perf_metric_t *pgui = &world->perf.metrics[PERF_GUI];
+    perf_metric_t *pinput = &world->perf.metrics[PERF_INPUT];
+
+    int fps_1pct_low = frametime->low_1pct_ms > 0.0f
+                           ? (int)(1000.0f / frametime->low_1pct_ms)
+                           : 0;
+    snprintf(buf, sizeof(buf),
+             "FPS: %d (1%% low: %d)  frametime: %.2f (1%% low: %.2f) ms",
+             delta_time > 0.0f ? (int)(1.0f / delta_time) : 0, fps_1pct_low,
+             frametime->avg_ms, frametime->low_1pct_ms);
     GuiLabel((Rectangle){x, y, aw, ROW_H}, buf);
     y += ROW_H;
 
@@ -411,25 +425,48 @@ void draw_debug_gui(world *world, float delta_time) {
     GuiLine((Rectangle){x, y, aw, 1}, NULL);
     y += 6;
 
-    float total = world->perf.clear_ms + world->perf.render_ms +
-                  world->perf.upload_ms + world->perf.blit_ms;
-    snprintf(buf, sizeof(buf), "clear:  %.2f ms", world->perf.clear_ms);
+    float total = clear->avg_ms + render->avg_ms + upload->avg_ms +
+                  uniform->avg_ms + shading->avg_ms;
+    snprintf(buf, sizeof(buf), "clear:   %.2f ms  (1%% low: %.2f)",
+             clear->avg_ms, clear->low_1pct_ms);
     GuiLabel((Rectangle){x, y, aw, ROW_H}, buf);
     y += ROW_H;
-    snprintf(buf, sizeof(buf), "render: %.2f ms", world->perf.render_ms);
+    snprintf(buf, sizeof(buf), "render:  %.2f ms  (1%% low: %.2f)",
+             render->avg_ms, render->low_1pct_ms);
     GuiLabel((Rectangle){x, y, aw, ROW_H}, buf);
     y += ROW_H;
-    snprintf(buf, sizeof(buf), "upload: %.2f ms", world->perf.upload_ms);
+    snprintf(buf, sizeof(buf), "upload:  %.2f ms  (1%% low: %.2f)",
+             upload->avg_ms, upload->low_1pct_ms);
     GuiLabel((Rectangle){x, y, aw, ROW_H}, buf);
     y += ROW_H;
-    snprintf(buf, sizeof(buf), "blit:   %.2f ms  [total: %.2f]",
-             world->perf.blit_ms, total);
+    snprintf(buf, sizeof(buf), "uniform: %.2f ms  (1%% low: %.2f)",
+             uniform->avg_ms, uniform->low_1pct_ms);
+    GuiLabel((Rectangle){x, y, aw, ROW_H}, buf);
+    y += ROW_H;
+    snprintf(buf, sizeof(buf), "shading: %.2f (1%% low: %.2f)  [total: %.2f]",
+             shading->avg_ms, shading->low_1pct_ms, total);
+    GuiLabel((Rectangle){x, y, aw, ROW_H}, buf);
+    y += ROW_H;
+
+    GuiLine((Rectangle){x, y, aw, 1}, NULL);
+    y += 6;
+
+    snprintf(buf, sizeof(buf), "input:   %.2f ms  (1%% low: %.2f)",
+             pinput->avg_ms, pinput->low_1pct_ms);
+    GuiLabel((Rectangle){x, y, aw, ROW_H}, buf);
+    y += ROW_H;
+    snprintf(buf, sizeof(buf), "update:  %.2f ms  (1%% low: %.2f)",
+             pupdate->avg_ms, pupdate->low_1pct_ms);
+    GuiLabel((Rectangle){x, y, aw, ROW_H}, buf);
+    y += ROW_H;
+    snprintf(buf, sizeof(buf), "gui:     %.2f ms  (1%% low: %.2f)",
+             pgui->avg_ms, pgui->low_1pct_ms);
     GuiLabel((Rectangle){x, y, aw, ROW_H}, buf);
   }
 
   /* ── Renderer ──────────────────────────────────────────────── */
   const float REND_W = 260.0f;
-  const float REND_CONTENT = PAD + 5.0f * ROW_H + PAD;
+  const float REND_CONTENT = PAD + 6.0f * ROW_H + PAD;
 
   if (do_window(&rend_win, "Renderer", REND_W, REND_CONTENT)) {
     float x = rend_win.pos.x + PAD;
@@ -446,6 +483,18 @@ void draw_debug_gui(world *world, float delta_time) {
       rw_edit = !rw_edit;
     if (world->settings.render_width != prev_rw)
       resize_renderer(world);
+    y += ROW_H;
+
+    {
+      bool gpu_lighting =
+          (world->settings.lighting_mode == LIGHTING_GPU_PHONG);
+      GuiLabel((Rectangle){x, y, LABEL_W, ROW_H}, "Lighting");
+      GuiToggle((Rectangle){cx, y, cw, ROW_H - 4},
+               gpu_lighting ? "GPU (Phong)" : "CPU (Lambertian)",
+               &gpu_lighting);
+      world->settings.lighting_mode =
+          gpu_lighting ? LIGHTING_GPU_PHONG : LIGHTING_CPU_LAMBERTIAN;
+    }
     y += ROW_H;
 
     {

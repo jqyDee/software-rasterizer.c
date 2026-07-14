@@ -39,7 +39,7 @@ INTERNAL_INLINE vec3f get_right(const cam *cam) {
 }
 
 INTERNAL_INLINE void apply_wasd(const world *world, const vec3f forward,
-                                const vec3f right, const bool factor,
+                                const vec3f right, const float factor,
                                 const float delta_time, vec3f *new_pos) {
   if (IsKeyDown(KEY_W)) {
     *new_pos = vec_add(*new_pos, vec_scale(forward, world->settings.move_speed *
@@ -59,7 +59,7 @@ INTERNAL_INLINE void apply_wasd(const world *world, const vec3f forward,
   }
 }
 
-INTERNAL_INLINE void apply_vertical(const world *world, const bool factor,
+INTERNAL_INLINE void apply_vertical(const world *world, const float factor,
                                     const float delta_time, vec3f *new_pos) {
   if (IsKeyDown(KEY_SPACE)) {
     new_pos->y += world->settings.move_speed * factor * delta_time;

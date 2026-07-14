@@ -8,11 +8,12 @@
 #include "engine/settings.h"
 #include "engine/undo.h"
 #include "math/vec.h"
+#include "renderer/lighting.h"
 #include "renderer/renderer.h"
 #include "ui/perf.h"
 
-#define BASE_RENDER_WIDTH 600
-#define CUT_OFF_PARALLEL_DRAWING 32
+#define BASE_RENDER_WIDTH 1200
+#define CUT_OFF_PARALLEL_DRAWING 60
 #define NEAR_PLANE 0.1f
 
 typedef struct world_s {
@@ -41,6 +42,10 @@ typedef struct world_s {
   int undo_len;
   undo_frame_t redo_stack[MAX_UNDO];
   int redo_len;
+
+  light_t lights[MAX_LIGHT_SOURCES];
+  size_t light_count;
+  vec3f light_dirs_cam[MAX_LIGHT_SOURCES];
 } world;
 
 bool init_world(world *world, int display_w, int display_h);

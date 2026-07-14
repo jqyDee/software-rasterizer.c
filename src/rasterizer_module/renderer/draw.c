@@ -1,7 +1,6 @@
 #include "draw.h"
 #include "../testing.h"
 
-#include <assert.h>
 #include <math.h>
 #include <omp.h>
 #include <renderer.h>
@@ -13,15 +12,19 @@
 
 #include "raylib.h"
 
+#include "../math/color.h"
 #include "../math/projection.h"
 #include "../math/vec.h"
 #include "../world.h"
+#include "buffers.h"
 #include "geometry.h"
+#include "tiling.h"
+#include "transform.h"
 
 // Initializes all incremental edge-function data for a Pineda-style rasterizer.
 // Output is winding-normalized: "inside pixel" always means all three e* >= 0.
 INTERNAL_INLINE void setup_edge_walk(vec3f p0, vec3f p1, vec3f p2, float seed_x,
-                                   float seed_y, edge_walk_t *ew) {
+                                     float seed_y, edge_walk_t *ew) {
   // signed area — positive = CCW winding in screen space (Y-down)
   float signed_area =
       (p2.x - p0.x) * (p1.y - p0.y) - (p2.y - p0.y) * (p1.x - p0.x);
@@ -65,35 +68,44 @@ INTERNAL_INLINE void setup_edge_walk(vec3f p0, vec3f p1, vec3f p2, float seed_x,
 
 // Returns the color for one pixel given its barycentric coords and depth.
 // Perspective-correct texture lookup if st->tex is set, otherwise flat_color.
-INTERNAL_INLINE Color fetch_pixel_color(const screen_tri_t *st, float b0,
-                                      float b1, float b2, float inv_depth) {
-  if (!st->tex)
-    return st->flat_color;
+INTERNAL_INLINE Color fetch_pixel_albedo(const screen_tri_t *st, float b0,
+                                         float b1, float b2, float inv_depth) {
+  Color base;
+  if (st->tex) {
+    const vec2f uv0 = st->uv[0], uv1 = st->uv[1], uv2 = st->uv[2];
+    const float inv_z0 = st->inv_z[0], inv_z1 = st->inv_z[1],
+                inv_z2 = st->inv_z[2];
+    float z = 1.0f / inv_depth; // = actual z at this pixel
+    // u/z is linear in screen space; interpolate u*inv_z barycentrically,
+    // then multiply by z to recover perspective-correct u
+    float u =
+        (b0 * uv0.x * inv_z0 + b1 * uv1.x * inv_z1 + b2 * uv2.x * inv_z2) * z;
+    float v =
+        (b0 * uv0.y * inv_z0 + b1 * uv1.y * inv_z1 + b2 * uv2.y * inv_z2) * z;
+    u -= floorf(u); // wrap to [0,1] for tiling
+    v -= floorf(v);
+    v = 1.0f - v; // UV V=0 is bottom; image row 0 is top: flip to match
+    int tex_x = (int)(u * (float)st->tex_w);
+    if (tex_x >= st->tex_w) {
+      tex_x = st->tex_w - 1;
+    }
+    int tex_y = (int)(v * (float)st->tex_h);
+    if (tex_y >= st->tex_h) {
+      tex_y = st->tex_h - 1;
+    }
 
-  const vec2f uv0 = st->uv[0], uv1 = st->uv[1], uv2 = st->uv[2];
-  const float inv_z0 = st->inv_z[0], inv_z1 = st->inv_z[1],
-              inv_z2 = st->inv_z[2];
-  float z = 1.0f / inv_depth; // = actual z at this pixel
-  // u/z is linear in screen space; interpolate u*inv_z barycentrically,
-  // then multiply by z to recover perspective-correct u
-  float u =
-      (b0 * uv0.x * inv_z0 + b1 * uv1.x * inv_z1 + b2 * uv2.x * inv_z2) * z;
-  float v =
-      (b0 * uv0.y * inv_z0 + b1 * uv1.y * inv_z1 + b2 * uv2.y * inv_z2) * z;
-  u -= floorf(u); // wrap to [0,1] for tiling
-  v -= floorf(v);
-  v = 1.0f - v; // UV V=0 is bottom; image row 0 is top: flip to match
-  int tex_x = (int)(u * (float)st->tex_w);
-  if (tex_x >= st->tex_w)
-    tex_x = st->tex_w - 1;
-  int tex_y = (int)(v * (float)st->tex_h);
-  if (tex_y >= st->tex_h)
-    tex_y = st->tex_h - 1;
-  return st->tex[tex_y * st->tex_w + tex_x];
+    base = st->tex[tex_y * st->tex_w + tex_x];
+  } else {
+    base = st->flat_color;
+  }
+
+  return base;
 }
 
-void draw_triangle_pixels_tiled(float *depthbuffer, Color *framebuffer,
-                                int *idbuffer, int screen_width,
+void draw_triangle_pixels_tiled(depthbuffer *depthbuffer,
+                                framebuffer *framebuffer, idbuffer *idbuffer,
+                                albedobuffer *albedobuffer,
+                                normalbuffer *normalbuffer, int screen_width,
                                 const screen_tri_t *st, int clip_x0,
                                 int clip_y0, int clip_x1, int clip_y1) {
   // clip triangle bbox to tile bounds: triangle may span multiple tiles
@@ -137,8 +149,8 @@ void draw_triangle_pixels_tiled(float *depthbuffer, Color *framebuffer,
         // gives perspective-correct depth without a per-pixel divide
         float inv_depth = b0 * inv_z0 + b1 * inv_z1 + b2 * inv_z2;
         // Biased (geometrically-outside) pixels: cap inv_depth to the farthest
-        // vertex. Prevents near-plane-clipped vertex (inv_z $approx$ 10) from inflating
-        // inv_depth and incorrectly overwriting closer geometry.
+        // vertex. Prevents near-plane-clipped vertex (inv_z $approx$ 10) from
+        // inflating inv_depth and incorrectly overwriting closer geometry.
         if (e0 < 0.f || e1 < 0.f || e2 < 0.f) {
           float iz_farthest = fminf(fminf(inv_z0, inv_z1), inv_z2);
           if (inv_depth > iz_farthest)
@@ -147,9 +159,47 @@ void draw_triangle_pixels_tiled(float *depthbuffer, Color *framebuffer,
         int pixel_idx = row_offset + col;
         if (inv_depth > depthbuffer[pixel_idx]) {
           depthbuffer[pixel_idx] = inv_depth;
-          if (idbuffer)
+
+          if (idbuffer) {
             idbuffer[pixel_idx] = instance_id;
-          framebuffer[pixel_idx] = fetch_pixel_color(st, b0, b1, b2, inv_depth);
+          }
+
+          if (framebuffer) {
+            Color albedo = fetch_pixel_albedo(st, b0, b1, b2, inv_depth);
+            framebuffer[pixel_idx] = color_scale(albedo, st->light_rgb);
+            if (albedobuffer) {
+              float z = 1.0f / inv_depth;
+              float shade = ((b0 * st->shadow[0] * inv_z0) +
+                             (b1 * st->shadow[1] * inv_z1) +
+                             (b2 * st->shadow[2] * inv_z2)) * z;
+              albedobuffer[pixel_idx] = (Color){
+                  (unsigned char)(albedo.r * shade),
+                  (unsigned char)(albedo.g * shade),
+                  (unsigned char)(albedo.b * shade),
+                  albedo.a,
+              };
+            }
+          }
+
+          if (normalbuffer) {
+            // interpolate same as for inv_depth. no perspective correcting
+            // needed, as normals are not texture coordinates
+            vec3f n = (vec3f){
+                b0 * st->normals[0].x + b1 * st->normals[1].x +
+                    b2 * st->normals[2].x,
+                b0 * st->normals[0].y + b1 * st->normals[1].y +
+                    b2 * st->normals[2].y,
+                b0 * st->normals[0].z + b1 * st->normals[1].z +
+                    b2 * st->normals[2].z,
+            };
+            n = vec_normalize(n); // interpolation shrinks magnitude
+            normalbuffer[pixel_idx] = (Color){
+                (unsigned char)((n.x * 0.5f + 0.5f) * 255.0f),
+                (unsigned char)((n.y * 0.5f + 0.5f) * 255.0f),
+                (unsigned char)((n.z * 0.5f + 0.5f) * 255.0f),
+                255,
+            };
+          }
         }
       }
       e0 += ew.e0_dx;
@@ -165,10 +215,12 @@ void draw_tiles_parallel(world *world, const int num_tiles,
                          const int bin_buf[MAX_BIN_ENTRIES],
                          const screen_tri_t screen_triangles[MAX_SCREEN_TRIS],
                          const int tiles_x) {
-  float *depthbuffer = world->renderer->depthbuffer;
-  Color *framebuffer = world->renderer->framebuffer;
-  int *idbuffer =
+  depthbuffer *depthbuffer = world->renderer->depthbuffer;
+  framebuffer *framebuffer = world->renderer->framebuffer;
+  idbuffer *idbuffer =
       world->settings.show_debug_gui ? world->renderer->idbuffer : NULL;
+  albedobuffer *albedobuffer = world->renderer->albedobuffer;
+  normalbuffer *normalbuffer = world->renderer->normalbuffer;
 
 #pragma omp parallel for schedule(dynamic)
   for (int tile_index = 0; tile_index < num_tiles; tile_index++) {
@@ -186,8 +238,9 @@ void draw_tiles_parallel(world *world, const int num_tiles,
     // draw the actual triangles in the bin
     for (int bin_id = tile_start_buf[tile_index]; bin_id < end; bin_id++)
       draw_triangle_pixels_tiled(
-          depthbuffer, framebuffer, idbuffer, world->renderer->screen_width,
-          &screen_triangles[bin_buf[bin_id]], x0, y0, x1, y1);
+          depthbuffer, framebuffer, idbuffer, albedobuffer, normalbuffer,
+          world->renderer->screen_width, &screen_triangles[bin_buf[bin_id]], x0,
+          y0, x1, y1);
   }
 }
 
@@ -223,8 +276,8 @@ void draw_normals(world *world) {
       vec3f v_cam[3];
       transform_triangle_to_camera(world->mesh_data, i, inst, world->cam,
                                    v_cam);
-
-      if (is_backfacing(v_cam))
+      vec3f normal = compute_face_normal(v_cam);
+      if (is_backfacing(v_cam, normal))
         continue;
 
       vec3f centroid = {
@@ -235,9 +288,6 @@ void draw_normals(world *world) {
       if (centroid.z <= world->settings.near_plane)
         continue;
 
-      vec3f edge1 = vec_sub(v_cam[1], v_cam[0]);
-      vec3f edge2 = vec_sub(v_cam[2], v_cam[0]);
-      vec3f normal = vec_normalize(vec_cross(edge1, edge2));
       vec3f tip = vec_add(centroid, vec_scale(normal, 0.25f));
       vec3f sc, st_proj;
       project(world->cam, world->renderer, centroid, &sc);

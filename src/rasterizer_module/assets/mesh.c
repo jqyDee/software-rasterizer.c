@@ -19,6 +19,7 @@ bool load_objs_files(world *world) {
   for (size_t i = 0; i < world->mesh_data_count; i++) {
     free(world->mesh_data[i].vertices);
     free(world->mesh_data[i].uvs);
+    free(world->mesh_data[i].normals);
   }
 
 #ifdef STATIC_RELEASE
@@ -28,7 +29,6 @@ bool load_objs_files(world *world) {
     if (dot && strcasecmp(dot, ".obj") == 0)
       obj_count++;
   }
-  char **obj_paths = NULL;
 #else
   const char *obj_exts[] = {".obj"};
   int obj_count = 0;

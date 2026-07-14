@@ -74,9 +74,11 @@ mesh make_sphere_mesh(int rings, int segs) {
   size_t vcount = (size_t)(rings * segs * 6);
   vec3f *v = malloc(vcount * sizeof(vec3f));
   vec2f *uv = malloc(vcount * sizeof(vec2f));
-  if (!v || !uv) {
+  vec3f *n = malloc(vcount * sizeof(vec3f));
+  if (!v || !uv || !n) {
     free(v);
     free(uv);
+    free(n);
     return (mesh){0};
   }
   size_t vi = 0;
@@ -96,21 +98,21 @@ mesh make_sphere_mesh(int rings, int segs) {
       vec3f v01 = {yr0 * cosf(p1), y0, yr0 * sinf(p1)};
       vec3f v10 = {yr1 * cosf(p0), y1, yr1 * sinf(p0)};
       vec3f v11 = {yr1 * cosf(p1), y1, yr1 * sinf(p1)};
-      /* tri A */ v[vi] = v00;
+      /* tri A */ v[vi] = v00; n[vi] = v00;
       uv[vi++] = (vec2f){u0, v0};
-      v[vi] = v01;
+      v[vi] = v01; n[vi] = v01;
       uv[vi++] = (vec2f){u1, v0};
-      v[vi] = v11;
+      v[vi] = v11; n[vi] = v11;
       uv[vi++] = (vec2f){u1, v1};
-      /* tri B */ v[vi] = v00;
+      /* tri B */ v[vi] = v00; n[vi] = v00;
       uv[vi++] = (vec2f){u0, v0};
-      v[vi] = v11;
+      v[vi] = v11; n[vi] = v11;
       uv[vi++] = (vec2f){u1, v1};
-      v[vi] = v10;
+      v[vi] = v10; n[vi] = v10;
       uv[vi++] = (vec2f){u0, v1};
     }
   }
-  mesh out = {.vertices = v, .uvs = uv, .vertex_count = vi};
+  mesh out = {.vertices = v, .uvs = uv, .normals = n, .vertex_count = vi};
   snprintf(out.name, sizeof(out.name), "Sphere");
   return out;
 }

@@ -1,11 +1,17 @@
 #include "renderer.h"
+#include "../testing.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 
+#include "../engine/shaders.h"
+#include "../engine/texture.h"
 #include "../world.h"
+#include "buffers.h"
 #include "draw.h"
 #include "geometry.h"
-#include "../engine/texture.h"
+#include "shadow.h"
+#include "tiling.h"
 
 void render(world *world) {
   int screen_width = world->renderer->screen_width;
@@ -24,6 +30,10 @@ void render(world *world) {
 
   if (num_tiles > MAX_TILES)
     num_tiles = MAX_TILES; // safety clamp
+
+  if (world->settings.lighting_mode == LIGHTING_GPU_PHONG) {
+    draw_shadow_map(world);
+  }
 
   // Phase 1: transform all triangles -> screen_tri_t list
   int screen_triangles_count = build_screen_tris(world, screen_triangles);
@@ -45,6 +55,7 @@ void render(world *world) {
 }
 
 void resize_renderer_to(world *world, int display_w, int display_h) {
+  printf("INFO: resizing\n");
   renderer *renderer = world->renderer;
   int render_width = world->settings.render_width;
 
@@ -58,21 +69,14 @@ void resize_renderer_to(world *world, int display_w, int display_h) {
   renderer->screen_height = new_h;
   renderer->aspect_ratio = (float)new_w / (float)new_h;
 
-  free(renderer->framebuffer);
-  free(renderer->depthbuffer);
-  free(renderer->idbuffer);
-  renderer->framebuffer = malloc(new_w * new_h * sizeof(Color));
-  if (!renderer->framebuffer)
-    exit(2);
-  renderer->depthbuffer = malloc(new_w * new_h * sizeof(float));
-  if (!renderer->depthbuffer)
-    exit(2);
-  renderer->idbuffer = malloc(new_w * new_h * sizeof(int));
-  if (!renderer->idbuffer)
-    exit(2);
+  destroy_buffers(renderer);
+  init_buffers(renderer);
 
-  UnloadTexture(renderer->screen_texture);
-  init_texture(renderer);
+  destroy_textures(renderer);
+  init_textures(renderer);
+
+  destroy_shaders(renderer);
+  init_shaders(renderer);
 }
 
 void resize_renderer(world *world) {

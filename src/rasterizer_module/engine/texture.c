@@ -123,9 +123,24 @@ void apply_lib_texture(world *world, int inst_idx, int lib_idx) {
   snprintf(inst->tex_path, sizeof(inst->tex_path), "%s", te->path);
 }
 
-void init_texture(renderer *renderer) {
+void init_textures(renderer *renderer) {
   Image image =
       GenImageColor(renderer->screen_width, renderer->screen_height, BLANK);
+  
   renderer->screen_texture = LoadTextureFromImage(image);
+  renderer->albedo_texture = LoadTextureFromImage(image);
+  renderer->normal_texture = LoadTextureFromImage(image);
   UnloadImage(image);
+
+  // normal_texture holds encoded vectors, not colors — bilinear filtering
+  // (the GL default) would blend encoded normals across surface
+  // discontinuities, producing invalid directions after decode+renormalize.
+  // Point filtering keeps each pixel's normal exact.
+  SetTextureFilter(renderer->normal_texture, TEXTURE_FILTER_POINT);
+}
+
+void destroy_textures(renderer *renderer) {
+  UnloadTexture(renderer->screen_texture);
+  UnloadTexture(renderer->albedo_texture);
+  UnloadTexture(renderer->normal_texture);
 }

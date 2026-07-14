@@ -1,5 +1,10 @@
 #pragma once
 
+typedef enum {
+  LIGHTING_CPU_LAMBERTIAN,
+  LIGHTING_GPU_PHONG,
+} lighting_mode_t;
+
 typedef struct settings_s {
   bool show_debug_gui;
   bool mouse_over_gui;
@@ -20,4 +25,6 @@ typedef struct settings_s {
   float ground_y;
   float camera_radius;
   float seam_bias;
+  float ambient_light;
+  lighting_mode_t lighting_mode;
 } settings;
