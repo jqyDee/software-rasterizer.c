@@ -16,7 +16,3 @@ void draw_tiles_parallel(world *world, const int num_tiles,
                          const int bin_buf[MAX_BIN_ENTRIES],
                          const screen_tri_t screen_triangles[MAX_SCREEN_TRIS],
                          const int tiles_x);
-
-void draw_normals(world *world);
-
-void draw_line_fb(renderer *r, int x0, int y0, int x1, int y1, Color c);

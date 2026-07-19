@@ -13,13 +13,10 @@
 #include "raylib.h"
 
 #include "../math/color.h"
-#include "../math/projection.h"
 #include "../math/vec.h"
 #include "../world.h"
 #include "buffers.h"
-#include "geometry.h"
 #include "tiling.h"
-#include "transform.h"
 
 // Initializes all incremental edge-function data for a Pineda-style rasterizer.
 // Output is winding-normalized: "inside pixel" always means all three e* >= 0.
@@ -244,58 +241,3 @@ void draw_tiles_parallel(world *world, const int num_tiles,
   }
 }
 
-void draw_line_fb(renderer *r, int x0, int y0, int x1, int y1, Color c) {
-  int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
-  int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
-  int err = dx + dy;
-  while (1) {
-    if (x0 >= 0 && x0 < r->screen_width && y0 >= 0 && y0 < r->screen_height)
-      r->framebuffer[y0 * r->screen_width + x0] = c;
-    if (x0 == x1 && y0 == y1)
-      break;
-    int e2 = 2 * err;
-    if (e2 >= dy) {
-      err += dy;
-      x0 += sx;
-    }
-    if (e2 <= dx) {
-      err += dx;
-      y0 += sy;
-    }
-  }
-}
-
-void draw_normals(world *world) {
-  if (!world->settings.show_normals)
-    return;
-
-  for (size_t ii = 0; ii < world->instance_count; ii++) {
-    const mesh_instance *inst = &world->instances[ii];
-    const mesh *m = &world->mesh_data[inst->mesh_idx];
-    for (size_t i = 0; i + 2 < m->vertex_count; i += 3) {
-      vec3f v_cam[3];
-      transform_triangle_to_camera(world->mesh_data, i, inst, world->cam,
-                                   v_cam);
-      vec3f normal = compute_face_normal(v_cam);
-      if (is_backfacing(v_cam, normal))
-        continue;
-
-      vec3f centroid = {
-          (v_cam[0].x + v_cam[1].x + v_cam[2].x) / 3.0f,
-          (v_cam[0].y + v_cam[1].y + v_cam[2].y) / 3.0f,
-          (v_cam[0].z + v_cam[1].z + v_cam[2].z) / 3.0f,
-      };
-      if (centroid.z <= world->settings.near_plane)
-        continue;
-
-      vec3f tip = vec_add(centroid, vec_scale(normal, 0.25f));
-      vec3f sc, st_proj;
-      project(world->cam, world->renderer, centroid, &sc);
-      if (tip.z > world->settings.near_plane) {
-        project(world->cam, world->renderer, tip, &st_proj);
-        draw_line_fb(world->renderer, (int)sc.x, (int)sc.y, (int)st_proj.x,
-                     (int)st_proj.y, BLUE);
-      }
-    }
-  }
-}

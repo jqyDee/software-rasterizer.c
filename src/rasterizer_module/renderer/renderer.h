@@ -69,6 +69,12 @@ typedef struct renderer_s {
   Shader phong_shader;
   int phong_normal_map_loc, phong_light_dirs_loc, phong_light_colors_loc,
       phong_light_intensities_loc, phong_light_count_loc, phong_ambient_loc;
+
+  Texture2D sky_texture; /* equirectangular panorama; id 0 = no sky */
+  int phong_sky_map_loc, phong_use_sky_loc, phong_cam_right_loc,
+      phong_cam_up_loc, phong_cam_fwd_loc, phong_focal_loc, phong_aspect_loc;
+  int phong_boost_loc, phong_time_loc,
+      phong_speed_loc; /* speed / boost screen FX */
 } renderer;
 
 void render(world *world);

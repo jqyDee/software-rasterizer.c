@@ -10,6 +10,9 @@
 #include "math/vec.h"
 #include "renderer/lighting.h"
 #include "renderer/renderer.h"
+#include "game/kart.h"
+#include "game/kart_tuning.h"
+#include "game/track.h"
 #include "ui/perf.h"
 
 #define BASE_RENDER_WIDTH 1200
@@ -21,6 +24,11 @@ typedef struct world_s {
   cam debug_cam;
   cam *cam;        /* active camera — points to game_cam or debug_cam */
   float player_vy; /* vertical velocity for game-camera jump */
+
+  kart *karts;
+  size_t kart_count;
+  kart_tuning kart_tuning;
+  track track_data;
 
   renderer *renderer;
 

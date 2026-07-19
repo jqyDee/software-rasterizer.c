@@ -7,12 +7,14 @@ typedef enum {
 
 typedef struct settings_s {
   bool show_debug_gui;
+  bool track_editor_active;
   bool mouse_over_gui;
   bool show_normals;
   bool text_input_active;
   bool dragging_gui;
   bool collision_enabled;
   bool show_collision_boxes;
+  bool show_kart_debug;
   bool show_fps;
   int render_width;
   int parallel_cutoff_rows;

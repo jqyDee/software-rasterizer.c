@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../math/rotation.h"
 #include "../world.h"
 #include "raylib.h"
 
@@ -52,8 +53,10 @@ void profile(world *world) {
     clear_depthbuffer(world->renderer->depthbuffer, screen_width,
                       screen_height);
     clear_idbuffer(world->renderer->idbuffer, screen_width, screen_height);
+    /* alpha 0 = "no geometry here" sentinel — the phong shader samples the
+     * skybox on these pixels; geometry writes always set alpha 255 */
     clear_color_buffer(world->renderer->albedobuffer, screen_width,
-                       screen_height, BLACK);
+                       screen_height, (Color){0, 0, 0, 0});
     clear_color_buffer(world->renderer->normalbuffer, screen_width,
                        screen_height, (Color){128, 128, 255, 255}); // encode(0,0,1)
   });
@@ -96,6 +99,55 @@ void profile(world *world) {
       SetShaderValue(world->renderer->phong_shader,
                      world->renderer->phong_ambient_loc,
                      &world->settings.ambient_light, SHADER_UNIFORM_FLOAT);
+
+      /* speed-boost screen FX: eased blend from the player kart + a clock
+       * for the animated streaks (works with or without a sky texture) */
+      float boost_amount =
+          world->kart_count > 0 ? world->karts[0].boost_visual : 0.0f;
+      float speed_amount =
+          world->kart_count > 0
+              ? kart_speed_ratio(&world->karts[0], &world->kart_tuning)
+              : 0.0f;
+      float shader_time = (float)GetTime();
+      SetShaderValue(world->renderer->phong_shader,
+                     world->renderer->phong_boost_loc, &boost_amount,
+                     SHADER_UNIFORM_FLOAT);
+      SetShaderValue(world->renderer->phong_shader,
+                     world->renderer->phong_speed_loc, &speed_amount,
+                     SHADER_UNIFORM_FLOAT);
+      SetShaderValue(world->renderer->phong_shader,
+                     world->renderer->phong_time_loc, &shader_time,
+                     SHADER_UNIFORM_FLOAT);
+
+      /* skybox: camera basis (cam→world, inverse of the view rotation
+       * rotate_x(-pitch)∘rotate_y(-yaw)) + projection params so the
+       * shader can reconstruct the world-space view ray per pixel */
+      int use_sky = world->renderer->sky_texture.id != 0;
+      SetShaderValue(world->renderer->phong_shader,
+                     world->renderer->phong_use_sky_loc, &use_sky,
+                     SHADER_UNIFORM_INT);
+      if (use_sky) {
+        const cam *c = world->cam;
+        vec3f cam_right =
+            rotate_y(rotate_x((vec3f){1, 0, 0}, c->pitch), c->yaw);
+        vec3f cam_up = rotate_y(rotate_x((vec3f){0, 1, 0}, c->pitch), c->yaw);
+        vec3f cam_fwd = rotate_y(rotate_x((vec3f){0, 0, 1}, c->pitch), c->yaw);
+        SetShaderValue(world->renderer->phong_shader,
+                       world->renderer->phong_cam_right_loc, &cam_right,
+                       SHADER_UNIFORM_VEC3);
+        SetShaderValue(world->renderer->phong_shader,
+                       world->renderer->phong_cam_up_loc, &cam_up,
+                       SHADER_UNIFORM_VEC3);
+        SetShaderValue(world->renderer->phong_shader,
+                       world->renderer->phong_cam_fwd_loc, &cam_fwd,
+                       SHADER_UNIFORM_VEC3);
+        SetShaderValue(world->renderer->phong_shader,
+                       world->renderer->phong_focal_loc, &c->focal_length,
+                       SHADER_UNIFORM_FLOAT);
+        SetShaderValue(world->renderer->phong_shader,
+                       world->renderer->phong_aspect_loc,
+                       &world->renderer->aspect_ratio, SHADER_UNIFORM_FLOAT);
+      }
     });
 
     // GPU-bound: draw + fragment shader execution. Scales with pixel count
@@ -111,6 +163,10 @@ void profile(world *world) {
       SetShaderValueTexture(world->renderer->phong_shader,
                             world->renderer->phong_normal_map_loc,
                             world->renderer->normal_texture);
+      if (world->renderer->sky_texture.id != 0)
+        SetShaderValueTexture(world->renderer->phong_shader,
+                              world->renderer->phong_sky_map_loc,
+                              world->renderer->sky_texture);
       DrawTexturePro(
           world->renderer->albedo_texture,
           (Rectangle){0, 0, world->renderer->albedo_texture.width,

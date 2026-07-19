@@ -1,5 +1,6 @@
 #include "world.h"
 
+#include <game/kart.h>
 #include <math/vec.h>
 #include <renderer/lighting.h>
 #include <stdio.h>
@@ -26,6 +27,10 @@ bool init_world(world *world, int display_w, int display_h) {
   world->debug_cam = world->game_cam;
   world->cam = &world->game_cam;
   world->player_vy = 0.0f;
+
+  world->kart_count = 1;
+  init_karts(world, world->kart_count);
+  kart_tuning_defaults(&world->kart_tuning);
 
   world->renderer = rendererM;
   world->settings = (settings){
@@ -116,6 +121,19 @@ bool init_world(world *world, int display_w, int display_h) {
   /* try to restore last session; silently keep defaults if not found */
   scene_load(world, "assets/scenes/scene.json");
 
+  /* attach kart visuals to scene instances (scene_load resets instances,
+   * so this must run after it) */
+  link_kart_instances(world);
+
+  /* track: load saved layout or fall back to the starter oval, then
+   * generate its mesh + instance (after scene_load — it wipes instances) */
+  if (!track_load(&world->track_data, TRACK_FILE))
+    track_default(&world->track_data);
+  track_build_mesh(world);
+
+  /* place karts on the starting grid at the track's start line */
+  kart_spawn_at_start(world);
+
   /* load textures for all instances that have a tex_path */
   reload_instance_textures(world);
 
@@ -132,6 +150,8 @@ void destroy_world(world *world) {
     free(world->renderer->framebuffer);
   if (world->renderer->idbuffer)
     free(world->renderer->idbuffer);
+
+  destroy_karts(world);
 
   if (world->renderer)
     free(world->renderer);

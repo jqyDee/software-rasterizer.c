@@ -49,9 +49,6 @@ void render(world *world) {
   // Phase 3: render tiles in parallel
   draw_tiles_parallel(world, num_tiles, tile_count_buf, tile_start_buf, bin_buf,
                       screen_triangles, tiles_x);
-
-  // Phase 4: debug normal arrows (single-threaded, only when enabled)
-  draw_normals(world);
 }
 
 void resize_renderer_to(world *world, int display_w, int display_h) {

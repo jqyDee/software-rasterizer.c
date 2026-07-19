@@ -1,10 +1,13 @@
 #include "input.h"
 #include "../testing.h"
 
+#include <stddef.h>
 #include <stdio.h>
 
 #include "../math/collision.h"
 #include "../math/vec.h"
+#include "../world.h"
+#include "raylib.h"
 
 // ========== DECL ==========
 INTERNAL_INLINE void ctrl_click_pick(world *world);
@@ -12,14 +15,33 @@ INTERNAL_INLINE user_input_response mouse_look(world *world);
 INTERNAL_INLINE void cam_movement(world *world, const float delta_time);
 INTERNAL_INLINE void undo_redo(world *world);
 INTERNAL_INLINE user_input_response function_keys(world *world);
+INTERNAL_INLINE controller_input get_controller_input(int gamepad_id,
+                                                      bool allow_keyboard);
 
 // ========== EXPORT ==========
 user_input_response handle_user_input(world *world, const float delta_time) {
+  /* cursor capture runs first so entering the track editor releases the
+   * mouse via mouse_look's own state machine */
+  user_input_response mr = mouse_look(world);
+  if (mr != UIR_NONE)
+    return mr;
+
+  if (world->settings.track_editor_active) {
+    /* editor owns mouse + letter keys; only function keys pass through */
+    return function_keys(world);
+  }
+
   ctrl_click_pick(world);
 
-  user_input_response r = mouse_look(world);
-  if (r != UIR_NONE)
-    return r;
+  for (size_t i = 0; i < world->kart_count; i++) {
+    kart *k = &world->karts[i];
+    /* keyboard drives kart 0 only, and only in game mode — in debug mode
+     * WASD/SPACE/SHIFT belong to the free-fly camera */
+    bool allow_keyboard = k->gamepad_id == 0 && !world->settings.show_debug_gui;
+    k->input = get_controller_input(k->gamepad_id, allow_keyboard);
+    kart_update(k, &world->track_data, &world->kart_tuning, delta_time);
+    kart_reset_frame_input(k);
+  }
 
   if (world->settings.text_input_active)
     return UIR_NONE;
@@ -112,6 +134,64 @@ INTERNAL_INLINE void move_cam_free_fly(world *world, const vec3f forward,
   cam->pos = new_pos;
 }
 
+INTERNAL_INLINE controller_input get_controller_input(int gamepad_id,
+                                                      bool allow_keyboard) {
+  controller_input input = {0};
+
+  const float STICK_DEADZONE = 0.15f;
+
+  // GAMEPAD INPUT
+  if (IsGamepadAvailable(gamepad_id)) {
+    // Steering (left stick X) with deadzone
+    float steering = GetGamepadAxisMovement(gamepad_id, GAMEPAD_AXIS_LEFT_X);
+    if (steering > -STICK_DEADZONE && steering < STICK_DEADZONE) {
+      steering = 0.0f;
+    }
+    input.steering_input = steering;
+
+    int accel = IsGamepadButtonDown(gamepad_id, GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
+    int brake =
+        IsGamepadButtonDown(gamepad_id, GAMEPAD_BUTTON_RIGHT_FACE_RIGHT);
+
+    if (accel) {
+      input.accel_input = 1.0f;
+    }
+    if (brake) {
+      input.accel_input = -1.0f;
+    }
+
+    input.jump_requested =
+        IsGamepadButtonDown(gamepad_id, GAMEPAD_BUTTON_RIGHT_FACE_LEFT);
+
+    input.drift_requested =
+        IsGamepadButtonDown(gamepad_id, GAMEPAD_BUTTON_RIGHT_TRIGGER_1);
+  }
+
+  // KEYBOARD FALLBACK
+  if (allow_keyboard) {
+    if (IsKeyDown(KEY_A))
+      input.steering_input -= 1.0f;
+    if (IsKeyDown(KEY_D))
+      input.steering_input += 1.0f;
+    if (IsKeyDown(KEY_W))
+      input.accel_input = 1.0f;
+    if (IsKeyDown(KEY_S))
+      input.accel_input = -1.0f;
+    if (IsKeyDown(KEY_SPACE))
+      input.jump_requested = true;
+    if (IsKeyDown(KEY_LEFT_SHIFT))
+      input.drift_requested = true;
+  }
+
+  // clamp (gamepad + keyboard can stack)
+  if (input.steering_input > 1.0f)
+    input.steering_input = 1.0f;
+  if (input.steering_input < -1.0f)
+    input.steering_input = -1.0f;
+
+  return input;
+}
+
 // GAME CAM
 INTERNAL_INLINE void move_cam_game(world *world, const vec3f forward,
                                    const vec3f right, const float delta_time) {
@@ -167,6 +247,13 @@ INTERNAL_INLINE user_input_response function_keys(world *world) {
     world->settings.show_debug_gui = !world->settings.show_debug_gui;
     world->cam =
         world->settings.show_debug_gui ? &world->debug_cam : &world->game_cam;
+  }
+  if (IsKeyPressed(KEY_F4)) {
+    world->settings.track_editor_active = !world->settings.track_editor_active;
+    if (!world->settings.track_editor_active) {
+      track_build_mesh(world);    /* apply edits when leaving the editor */
+      kart_spawn_at_start(world); /* regrid karts on the edited layout */
+    }
   }
   if (IsKeyPressed(KEY_F5)) {
     return UIR_RELOAD_PLUGIN;
@@ -229,9 +316,10 @@ INTERNAL_INLINE user_input_response mouse_look(world *world) {
   // SetMousePosition which resets the delta accumulator if called every frame.
   static bool cursor_disabled = false;
   bool capture =
-      !settings->show_debug_gui ||
-      (!IsKeyDown(KEY_LEFT_CONTROL) && IsMouseButtonDown(MOUSE_LEFT_BUTTON) &&
-       !settings->mouse_over_gui);
+      !settings->track_editor_active &&
+      (!settings->show_debug_gui ||
+       (!IsKeyDown(KEY_LEFT_CONTROL) && IsMouseButtonDown(MOUSE_LEFT_BUTTON) &&
+        !settings->mouse_over_gui));
 
   if (capture) {
     if (!cursor_disabled) {
