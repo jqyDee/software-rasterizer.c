@@ -16,6 +16,10 @@ typedef struct settings_s {
   bool show_collision_boxes;
   bool show_kart_debug;
   bool show_fps;
+  bool debug_skip_texture;
+  bool debug_skip_normalbuffer;
+  bool debug_skip_albedobuffer;
+  bool debug_skip_framebuffer;
   int render_width;
   int parallel_cutoff_rows;
   float near_plane;

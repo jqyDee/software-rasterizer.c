@@ -11,7 +11,7 @@ typedef struct world_s world;
 typedef struct track_s track;
 
 #define MAX_KART_COUNT 4
-#define RACE_CHECKPOINTS 4 // virtual checkpoints per lap (anti-cut)
+#define RACE_CHECKPOINTS 20 // virtual checkpoints per lap (anti-cut)
 
 typedef enum drift_state_e {
   DRIFT_NONE,
@@ -84,3 +84,6 @@ void kart_spawn_at_start(world *world);
 void link_kart_instances(world *world);
 /* copy kart pos/yaw into the linked mesh instances (call once per frame) */
 void kart_sync_instances(world *world);
+/* game-mode camera follow: trails each kart's smoothed heading (call once
+ * per frame, game mode only) */
+void kart_update_cameras(world *world);

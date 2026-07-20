@@ -72,10 +72,28 @@ void profile(world *world) {
     });
 
     // CPU-side cost of packing light data into shader uniforms — fixed
-    // cost, scales only with light_count, independent of screen resolution.
+    // cost, scales only with light_count/viewport_count, independent of
+    // screen resolution.
     vec3f light_colors_norm[MAX_LIGHT_SOURCES];
     float light_intensities[MAX_LIGHT_SOURCES];
     int light_count = (int)world->light_count;
+
+    // split-screen: debug free-fly / no-karts still render a single
+    // full-frame viewport (matches render()'s own fallback); game mode
+    // shades one viewport per active kart — all in the SAME draw call, the
+    // shader picks the right camera/light row per pixel (see phong.fs)
+    bool single_view = world->settings.show_debug_gui || world->kart_count == 0;
+    int active_viewports = single_view ? 1 : (int)world->kart_count;
+
+    Vector4 viewport_rects[MAX_KART_COUNT];
+    vec3f cam_right[MAX_KART_COUNT], cam_up[MAX_KART_COUNT],
+        cam_fwd[MAX_KART_COUNT];
+    float focal_len[MAX_KART_COUNT], aspect_ratio[MAX_KART_COUNT];
+    float boost_amount[MAX_KART_COUNT] = {0}, speed_amount[MAX_KART_COUNT] = {0};
+    Vector2 buffer_size;
+    buffer_size.x = (float)world->renderer->screen_width;
+    buffer_size.y = (float)world->renderer->screen_height;
+
     PROFILE(PERF_UNIFORM, {
       for (int i = 0; i < light_count; i++) {
         light_colors_norm[i] = ((vec3f){world->lights[i].color.r / 255.0f,
@@ -84,9 +102,6 @@ void profile(world *world) {
         light_intensities[i] = world->lights[i].intensity;
       }
 
-      SetShaderValueV(world->renderer->phong_shader,
-                      world->renderer->phong_light_dirs_loc,
-                      world->light_dirs_cam, SHADER_UNIFORM_VEC3, light_count);
       SetShaderValueV(world->renderer->phong_shader,
                       world->renderer->phong_light_colors_loc,
                       light_colors_norm, SHADER_UNIFORM_VEC3, light_count);
@@ -99,59 +114,89 @@ void profile(world *world) {
       SetShaderValue(world->renderer->phong_shader,
                      world->renderer->phong_ambient_loc,
                      &world->settings.ambient_light, SHADER_UNIFORM_FLOAT);
+      // world->light_dirs_cam is vec3f[MAX_KART_COUNT][MAX_LIGHT_SOURCES] —
+      // contiguous, uploads directly as a flat MAX_KART_COUNT*MAX_LIGHT_SOURCES
+      // array matching lightDirs[MAX_VIEWPORTS][MAX_LIGHTS] in the shader
+      SetShaderValueV(world->renderer->phong_shader,
+                      world->renderer->phong_light_dirs_loc,
+                      world->light_dirs_cam, SHADER_UNIFORM_VEC3,
+                      MAX_KART_COUNT * MAX_LIGHT_SOURCES);
 
-      /* speed-boost screen FX: eased blend from the player kart + a clock
-       * for the animated streaks (works with or without a sky texture) */
-      float boost_amount =
-          world->kart_count > 0 ? world->karts[0].boost_visual : 0.0f;
-      float speed_amount =
-          world->kart_count > 0
-              ? kart_speed_ratio(&world->karts[0], &world->kart_tuning)
-              : 0.0f;
-      float shader_time = (float)GetTime();
-      SetShaderValue(world->renderer->phong_shader,
-                     world->renderer->phong_boost_loc, &boost_amount,
-                     SHADER_UNIFORM_FLOAT);
-      SetShaderValue(world->renderer->phong_shader,
-                     world->renderer->phong_speed_loc, &speed_amount,
-                     SHADER_UNIFORM_FLOAT);
-      SetShaderValue(world->renderer->phong_shader,
-                     world->renderer->phong_time_loc, &shader_time,
-                     SHADER_UNIFORM_FLOAT);
-
-      /* skybox: camera basis (cam→world, inverse of the view rotation
-       * rotate_x(-pitch)∘rotate_y(-yaw)) + projection params so the
-       * shader can reconstruct the world-space view ray per pixel */
       int use_sky = world->renderer->sky_texture.id != 0;
       SetShaderValue(world->renderer->phong_shader,
                      world->renderer->phong_use_sky_loc, &use_sky,
                      SHADER_UNIFORM_INT);
-      if (use_sky) {
-        const cam *c = world->cam;
-        vec3f cam_right =
-            rotate_y(rotate_x((vec3f){1, 0, 0}, c->pitch), c->yaw);
-        vec3f cam_up = rotate_y(rotate_x((vec3f){0, 1, 0}, c->pitch), c->yaw);
-        vec3f cam_fwd = rotate_y(rotate_x((vec3f){0, 0, 1}, c->pitch), c->yaw);
-        SetShaderValue(world->renderer->phong_shader,
-                       world->renderer->phong_cam_right_loc, &cam_right,
-                       SHADER_UNIFORM_VEC3);
-        SetShaderValue(world->renderer->phong_shader,
-                       world->renderer->phong_cam_up_loc, &cam_up,
-                       SHADER_UNIFORM_VEC3);
-        SetShaderValue(world->renderer->phong_shader,
-                       world->renderer->phong_cam_fwd_loc, &cam_fwd,
-                       SHADER_UNIFORM_VEC3);
-        SetShaderValue(world->renderer->phong_shader,
-                       world->renderer->phong_focal_loc, &c->focal_length,
-                       SHADER_UNIFORM_FLOAT);
-        SetShaderValue(world->renderer->phong_shader,
-                       world->renderer->phong_aspect_loc,
-                       &world->renderer->aspect_ratio, SHADER_UNIFORM_FLOAT);
+
+      SetShaderValue(world->renderer->phong_shader,
+                     world->renderer->phong_buffer_size_loc, &buffer_size,
+                     SHADER_UNIFORM_VEC2);
+      SetShaderValue(world->renderer->phong_shader,
+                     world->renderer->phong_viewport_count_loc,
+                     &active_viewports, SHADER_UNIFORM_INT);
+
+      float shader_time = (float)GetTime();
+      SetShaderValue(world->renderer->phong_shader,
+                     world->renderer->phong_time_loc, &shader_time,
+                     SHADER_UNIFORM_FLOAT);
+
+      for (int i = 0; i < active_viewports; i++) {
+        viewport vp = single_view
+                          ? viewport_full_frame(world->renderer)
+                          : compute_kart_viewport(i, active_viewports,
+                                                  world->renderer->screen_width,
+                                                  world->renderer->screen_height);
+        viewport_rects[i].x = (float)vp.x;
+        viewport_rects[i].y = (float)vp.y;
+        viewport_rects[i].z = (float)vp.w;
+        viewport_rects[i].w = (float)vp.h;
+
+        const cam *c = single_view ? world->cam : &world->game_cams[i];
+        cam_right[i] = rotate_y(rotate_x((vec3f){1, 0, 0}, c->pitch), c->yaw);
+        cam_up[i] = rotate_y(rotate_x((vec3f){0, 1, 0}, c->pitch), c->yaw);
+        cam_fwd[i] = rotate_y(rotate_x((vec3f){0, 0, 1}, c->pitch), c->yaw);
+        focal_len[i] = c->focal_length;
+        aspect_ratio[i] = vp.aspect_ratio;
+
+        /* speed-boost screen FX: eased blend from this viewport's kart */
+        int kart_idx = single_view ? 0 : i;
+        if (world->kart_count > (size_t)kart_idx) {
+          boost_amount[i] = world->karts[kart_idx].boost_visual;
+          speed_amount[i] = kart_speed_ratio(&world->karts[kart_idx],
+                                             &world->kart_tuning);
+        }
       }
+
+      SetShaderValueV(world->renderer->phong_shader,
+                      world->renderer->phong_viewport_rects_loc,
+                      viewport_rects, SHADER_UNIFORM_VEC4, MAX_KART_COUNT);
+      SetShaderValueV(world->renderer->phong_shader,
+                      world->renderer->phong_cam_right_loc, cam_right,
+                      SHADER_UNIFORM_VEC3, MAX_KART_COUNT);
+      SetShaderValueV(world->renderer->phong_shader,
+                      world->renderer->phong_cam_up_loc, cam_up,
+                      SHADER_UNIFORM_VEC3, MAX_KART_COUNT);
+      SetShaderValueV(world->renderer->phong_shader,
+                      world->renderer->phong_cam_fwd_loc, cam_fwd,
+                      SHADER_UNIFORM_VEC3, MAX_KART_COUNT);
+      SetShaderValueV(world->renderer->phong_shader,
+                      world->renderer->phong_focal_loc, focal_len,
+                      SHADER_UNIFORM_FLOAT, MAX_KART_COUNT);
+      SetShaderValueV(world->renderer->phong_shader,
+                      world->renderer->phong_aspect_loc, aspect_ratio,
+                      SHADER_UNIFORM_FLOAT, MAX_KART_COUNT);
+      SetShaderValueV(world->renderer->phong_shader,
+                      world->renderer->phong_boost_loc, boost_amount,
+                      SHADER_UNIFORM_FLOAT, MAX_KART_COUNT);
+      SetShaderValueV(world->renderer->phong_shader,
+                      world->renderer->phong_speed_loc, speed_amount,
+                      SHADER_UNIFORM_FLOAT, MAX_KART_COUNT);
     });
 
-    // GPU-bound: draw + fragment shader execution. Scales with pixel count
-    // (fill rate) and light_count (the per-pixel light loop in phong.fs).
+    // GPU-bound: draw + fragment shader execution. One full-window draw
+    // call shades every viewport at once — the fragment shader looks up
+    // which viewport rect each pixel falls in (see phong.fs) and uses that
+    // viewport's row of the arrays set above. No scissor, no per-viewport
+    // draw calls.
     PROFILE(PERF_SHADING, {
       BeginShaderMode(world->renderer->phong_shader);
       // Texture-sampler uniforms must be registered after BeginShaderMode:

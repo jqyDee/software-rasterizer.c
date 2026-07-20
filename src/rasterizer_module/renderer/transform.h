@@ -5,6 +5,16 @@
 #include "../assets/mesh.h"
 #include "../engine/cam.h"
 #include "../math/vec.h"
+#include "../world.h"
+
+typedef struct transform_basis_s {
+  vec3f right, up, fwd, pos;
+  vec3f n_right, n_up, n_fwd;
+} transform_basis;
+
+void compute_instance_basis(const mesh_instance *inst, transform_basis *out);
+void transform_triangle_with_basis(const mesh *mesh_data, size_t triangle_index, const transform_basis *basis, vec3f out[3]);
+void transform_normal_with_basis(vec3f normal, const transform_basis *basis, const cam *cam, vec3f *out);
 
 void transform_triangle_to_world(const mesh *mesh_data, size_t triangle_index,
                                  const mesh_instance *inst, vec3f out[3]);

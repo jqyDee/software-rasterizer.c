@@ -85,6 +85,78 @@ Single-player car physics + camera, then split-screen multiplayer.
 
 ---
 
+## Split-screen rendering performance (follow-up to Phase 2)
+
+Split-screen (per-kart viewports, `renderer.c`'s `render()` loop calling
+`build_screen_tris`/bin/`draw_tiles_parallel` once per kart) works correctly
+but frame time drops more than linearly with player count — 4 players cuts
+it to less than half of 1 player. Confirmed via the debug stats overlay
+(F3): `PERF_RENDER` scales roughly with kart count while `PERF_UPLOAD`/
+`PERF_SHADING` stay flat (GPU shading is already a single pass — see below).
+
+**Root cause:** `build_screen_tris` (`renderer/geometry.c`) iterates *every
+instance, every triangle in the scene* once per viewport — transform to
+camera space, backface test, near-plane clip, Lambertian lighting, project,
+bbox/fp-bias — regardless of how much of that geometry is actually visible
+in that viewport. There's no frustum/visibility culling before this loop.
+Going from 1 to N karts multiplies this whole CPU pass by N, even though
+each viewport only covers ~1/N of the screen.
+
+**Two separate, independent optimizations — don't conflate them:**
+
+### 1. Merge tile binning + draw into one pass (minor win, safe, low effort)
+
+Right now each viewport gets its own `compute_triangles_per_tile` →
+`compute_tile_starts` → `bin_triangles_into_tiles` → `draw_tiles_parallel`
+cycle, each opening a fresh `#pragma omp parallel for` over just that
+viewport's tiles. Since every triangle's bbox (`screen_tri_t.bx0/by0/bx1/by1`)
+is already clamped to its own viewport's rect in *absolute framebuffer
+coordinates* (Phase 1's design), triangles from different viewports can
+safely share one array and one binning pass without any cross-viewport
+bleed — a triangle's bbox alone keeps it out of tiles outside its viewport.
+
+Plan:
+- `build_screen_tris` still runs once per viewport (unavoidable — each
+  viewport's camera produces a different projection) but **appends** to a
+  shared `screen_triangles[]` with a running offset instead of each viewport
+  restarting from 0 and overwriting the static buffer.
+- Run `compute_triangles_per_tile`/`compute_tile_starts`/
+  `bin_triangles_into_tiles`/`draw_tiles_parallel` **once**, over the tile
+  grid for the *whole* framebuffer (`vp_x0=0, vp_y0=0, tiles_x/y` from full
+  `screen_width/height`) instead of per-viewport.
+- Win: one `omp parallel for` instead of N, and OpenMP load-balances across
+  *all* tiles from *all* viewports at once — an uneven scene (one kart
+  facing a wall of geometry, another facing open sky) won't leave threads
+  idle in the light viewport's pass the way per-viewport parallel regions do.
+- Does **not** reduce the per-triangle transform/lighting cost — only trims
+  the binning/draw overhead around it.
+
+### 2. Frustum/visibility culling per viewport (the actual fix, more effort)
+
+Skip instances whose bounding volume doesn't overlap a given viewport's
+camera frustum *before* running the full per-triangle transform+clip+light+
+project loop on them, so each viewport's CPU cost scales with what's
+actually visible to it, not total scene size.
+
+Needs:
+- Per-instance bounding volume (AABB or bounding sphere) — not currently
+  tracked anywhere (`mesh_instance` has no bounds field).
+- A frustum test (or cheaper: bounding-sphere-vs-frustum-planes, or even a
+  coarse "is instance within N units and within some angle of cam forward"
+  heuristic given the track is roughly planar) run once per instance per
+  viewport, before `build_screen_tris`'s inner per-triangle loop.
+- Care: the shadow map pass (light-space, camera-independent, already
+  correctly runs once per frame not once per viewport — don't couple this
+  culling to shadow rendering, it needs the light's frustum instead, or no
+  culling at all if the scene stays small).
+
+Worth prototyping culling stats first (how many instances/triangles are
+actually off-frustum in the current test track) before committing to a
+specific bounding-volume scheme — the current scene is small enough that
+the win may not matter until tracks get larger or instance counts grow.
+
+---
+
 ## Engine/Game split (future refactor)
 
 Make rasterizer engine standalone by separating graphics code from game logic.

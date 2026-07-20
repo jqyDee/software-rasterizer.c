@@ -46,9 +46,23 @@ void add_instance(world *world, int mesh_idx) {
   }
 }
 
+bool instance_is_protected(const world *world, int idx) {
+  if (idx < 0 || idx >= (int)world->instance_count)
+    return false;
+  const mesh_instance *inst = &world->instances[idx];
+  if (strcmp(world->mesh_data[inst->mesh_idx].name, "__track__") == 0)
+    return true;
+  for (size_t i = 0; i < world->kart_count; i++)
+    if (world->karts[i].instance_idx == idx)
+      return true;
+  return false;
+}
+
 void remove_instance(world *world, int idx) {
   if (idx < 0 || idx >= (int)world->instance_count)
     return;
+  if (instance_is_protected(world, idx))
+    return; /* track / kart visuals are engine-managed, not user-deletable */
   scene_push_undo(world);
   free(world->instances[idx].tex_pixels);
   int last = (int)world->instance_count - 1;
@@ -56,6 +70,14 @@ void remove_instance(world *world, int idx) {
   world->instances[last].tex_pixels =
       NULL; /* ownership moved, don't double-free */
   world->instance_count--;
+
+  /* the instance that lived at `last` just moved into `idx` — any kart
+   * whose visual was that instance must follow it, or kart_sync_instances
+   * silently starts writing into whatever now occupies the old slot */
+  for (size_t i = 0; i < world->kart_count; i++)
+    if (world->karts[i].instance_idx == last)
+      world->karts[i].instance_idx = idx;
+
   if (world->selected_instance == idx)
     world->selected_instance = -1;
   else if (world->selected_instance == last)

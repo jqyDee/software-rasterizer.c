@@ -40,7 +40,8 @@ void draw_gizmo(world *world) {
   if (cam_coordinates.z <= near)
     return;
   vec3f sc;
-  project(world->cam, world->renderer, cam_coordinates, &sc);
+  viewport vp = viewport_full_frame(world->renderer);
+  project(world->cam, &vp, cam_coordinates, &sc);
   float cx = sc.x * dscale;
   float cy = sc.y * dscale;
 
@@ -67,7 +68,7 @@ void draw_gizmo(world *world) {
     if (ctip.z <= near)
       continue;
     vec3f st;
-    project(world->cam, world->renderer, ctip, &st);
+    project(world->cam, &vp, ctip, &st);
 
     float dx = st.x * dscale - cx;
     float dy = st.y * dscale - cy;
@@ -156,6 +157,7 @@ void draw_collision_boxes(const world *world) {
       cc[ci] = rotate_x(rotate_y(rel, -world->cam->yaw), -world->cam->pitch);
     }
 
+    viewport vp = viewport_full_frame(world->renderer);
     Color col = (ii == world->selected_instance) ? RED : BLUE;
     for (int e = 0; e < 12; e++) {
       vec3f ca = cc[edges[e][0]], cb = cc[edges[e][1]];
@@ -172,8 +174,8 @@ void draw_collision_boxes(const world *world) {
       }
 
       vec3f sa, sb;
-      project(world->cam, world->renderer, ca, &sa);
-      project(world->cam, world->renderer, cb, &sb);
+      project(world->cam, &vp, ca, &sa);
+      project(world->cam, &vp, cb, &sb);
       DrawLine((int)(sa.x * scx), (int)(sa.y * scy), (int)(sb.x * scx),
                (int)(sb.y * scy), col);
     }
@@ -190,34 +192,51 @@ void draw_normals(const world *world) {
   float scy = (float)world->renderer->display_height /
               (float)world->renderer->screen_height;
 
-  for (size_t ii = 0; ii < world->instance_count; ii++) {
-    const mesh_instance *inst = &world->instances[ii];
-    const mesh *m = &world->mesh_data[inst->mesh_idx];
-    for (size_t i = 0; i + 2 < m->vertex_count; i += 3) {
-      vec3f v_cam[3];
-      transform_triangle_to_camera(world->mesh_data, i, inst, world->cam,
-                                   v_cam);
-      vec3f normal = compute_face_normal(v_cam);
-      if (is_backfacing(v_cam, normal))
-        continue;
+  /* debug free-fly mode is a single full-frame pass through world->cam
+   * (matches render()'s own fallback); game mode draws the scene's normals
+   * once per split-screen viewport, through that viewport's own camera —
+   * otherwise viewports 1+ would show normals projected with the wrong
+   * camera and viewport 0's own scaling would be wrong too */
+  bool single_view = world->settings.show_debug_gui;
+  size_t view_count =
+      single_view ? 1 : (world->kart_count > 0 ? world->kart_count : 1);
 
-      vec3f centroid = {
-          (v_cam[0].x + v_cam[1].x + v_cam[2].x) / 3.0f,
-          (v_cam[0].y + v_cam[1].y + v_cam[2].y) / 3.0f,
-          (v_cam[0].z + v_cam[1].z + v_cam[2].z) / 3.0f,
-      };
-      if (centroid.z <= near)
-        continue;
+  for (size_t vi = 0; vi < view_count; vi++) {
+    const cam *c = single_view ? world->cam : &world->game_cams[vi];
+    viewport vp = single_view
+                      ? viewport_full_frame(world->renderer)
+                      : compute_kart_viewport((int)vi, (int)world->kart_count,
+                                              world->renderer->screen_width,
+                                              world->renderer->screen_height);
 
-      vec3f tip = vec_add(centroid, vec_scale(normal, 0.25f));
-      if (tip.z <= near)
-        continue;
+    for (size_t ii = 0; ii < world->instance_count; ii++) {
+      const mesh_instance *inst = &world->instances[ii];
+      const mesh *m = &world->mesh_data[inst->mesh_idx];
+      for (size_t i = 0; i + 2 < m->vertex_count; i += 3) {
+        vec3f v_cam[3];
+        transform_triangle_to_camera(world->mesh_data, i, inst, c, v_cam);
+        vec3f normal = compute_face_normal(v_cam);
+        if (is_backfacing(v_cam, normal))
+          continue;
 
-      vec3f sc, st;
-      project(world->cam, world->renderer, centroid, &sc);
-      project(world->cam, world->renderer, tip, &st);
-      DrawLine((int)(sc.x * scx), (int)(sc.y * scy), (int)(st.x * scx),
-               (int)(st.y * scy), BLUE);
+        vec3f centroid = {
+            (v_cam[0].x + v_cam[1].x + v_cam[2].x) / 3.0f,
+            (v_cam[0].y + v_cam[1].y + v_cam[2].y) / 3.0f,
+            (v_cam[0].z + v_cam[1].z + v_cam[2].z) / 3.0f,
+        };
+        if (centroid.z <= near)
+          continue;
+
+        vec3f tip = vec_add(centroid, vec_scale(normal, 0.25f));
+        if (tip.z <= near)
+          continue;
+
+        vec3f sc, st;
+        project(c, &vp, centroid, &sc);
+        project(c, &vp, tip, &st);
+        DrawLine((int)(sc.x * scx), (int)(sc.y * scy), (int)(st.x * scx),
+                 (int)(st.y * scy), BLUE);
+      }
     }
   }
 }

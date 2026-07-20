@@ -5,7 +5,7 @@
 
 void draw_stats_window(world *world, gui_state_t *gs, float delta_time) {
   const float STATS_W = 340.0f;
-  const float STATS_CONTENT = PAD + 11.0f * ROW_H + PAD;
+  const float STATS_CONTENT = PAD + 19.0f * ROW_H + PAD;
 
   if (do_window(&gs->stats_win, "Stats", STATS_W, STATS_CONTENT)) {
     float x = gs->stats_win.pos.x + PAD;
@@ -16,6 +16,14 @@ void draw_stats_window(world *world, gui_state_t *gs, float delta_time) {
     perf_metric_t *frametime = &world->perf.metrics[PERF_FRAMETIME];
     perf_metric_t *clear = &world->perf.metrics[PERF_CLEAR];
     perf_metric_t *render = &world->perf.metrics[PERF_RENDER];
+    perf_metric_t *r_geom = &world->perf.metrics[PERF_RENDER_GEOM];
+    perf_metric_t *r_geom_xform = &world->perf.metrics[PERF_RENDER_GEOM_XFORM];
+    perf_metric_t *r_bin = &world->perf.metrics[PERF_RENDER_BINNING];
+    perf_metric_t *r_rast = &world->perf.metrics[PERF_RENDER_RASTER];
+    perf_metric_t *r_iter = &world->perf.metrics[PERF_RASTER_ITER];
+    perf_metric_t *r_edge = &world->perf.metrics[PERF_RASTER_EDGE_PASS];
+    perf_metric_t *r_depth = &world->perf.metrics[PERF_RASTER_DEPTH_PASS];
+    perf_metric_t *r_shad = &world->perf.metrics[PERF_RENDER_SHADOW];
     perf_metric_t *upload = &world->perf.metrics[PERF_UPLOAD];
     perf_metric_t *uniform = &world->perf.metrics[PERF_UNIFORM];
     perf_metric_t *shading = &world->perf.metrics[PERF_SHADING];
@@ -57,6 +65,39 @@ void draw_stats_window(world *world, gui_state_t *gs, float delta_time) {
              render->avg_ms, render->low_1pct_ms);
     GuiLabel((Rectangle){x, y, aw, ROW_H}, buf);
     y += ROW_H;
+    snprintf(buf, sizeof(buf), " - geom:   %.2f ms", r_geom->avg_ms);
+    GuiLabel((Rectangle){x, y, aw, ROW_H}, buf);
+    y += ROW_H;
+    snprintf(buf, sizeof(buf), "   - xform: %.2f ms", r_geom_xform->avg_ms);
+    GuiLabel((Rectangle){x, y, aw, ROW_H}, buf);
+    y += ROW_H;
+    snprintf(buf, sizeof(buf), " - bin:    %.2f ms", r_bin->avg_ms);
+    GuiLabel((Rectangle){x, y, aw, ROW_H}, buf);
+    y += ROW_H;
+    snprintf(buf, sizeof(buf), " - raster: %.2f ms", r_rast->avg_ms);
+    GuiLabel((Rectangle){x, y, aw, ROW_H}, buf);
+    y += ROW_H;
+    {
+      float fill_pct = r_iter->avg_ms > 0.0f
+                           ? 100.0f * r_edge->avg_ms / r_iter->avg_ms
+                           : 0.0f;
+      snprintf(buf, sizeof(buf), "   - fill: %.0f%%",
+               fill_pct);
+      GuiLabel((Rectangle){x, y, aw, ROW_H}, buf);
+      y += ROW_H;
+      float overdraw = r_depth->avg_ms > 0.0f
+                            ? r_edge->avg_ms / r_depth->avg_ms
+                            : 0.0f;
+      snprintf(buf, sizeof(buf), "   - overdraw: %.2fx",
+               overdraw);
+      GuiLabel((Rectangle){x, y, aw, ROW_H}, buf);
+      y += ROW_H;
+    }
+    if (world->settings.lighting_mode == LIGHTING_GPU_PHONG) {
+      snprintf(buf, sizeof(buf), " - shadow: %.2f ms", r_shad->avg_ms);
+      GuiLabel((Rectangle){x, y, aw, ROW_H}, buf);
+      y += ROW_H;
+    }
     snprintf(buf, sizeof(buf), "upload:  %.2f ms  (1%% low: %.2f)",
              upload->avg_ms, upload->low_1pct_ms);
     GuiLabel((Rectangle){x, y, aw, ROW_H}, buf);

@@ -26,6 +26,12 @@ typedef depthbuffer depthbuffer_t;
 #define SHADOW_BIAS 0.50f     // world units, kills shadow acne — tune visually
 #define SHADOW_DARKNESS 0.50f // multiplier for occluded pixels
 
+typedef struct viewport_s {
+    int x, y;
+    int w, h;
+    float aspect_ratio;
+} viewport;
+
 typedef struct screen_tri_s {
   vec3f v[3];
   vec2f uv[3];
@@ -42,10 +48,10 @@ typedef struct screen_tri_s {
 } screen_tri_t;
 
 typedef struct edge_walk_s {
-  float e0_dx, e0_dy, e0_seed;
-  float e1_dx, e1_dy, e1_seed;
-  float e2_dx, e2_dy, e2_seed;
-  float inv_signed_area;
+  double e0_dx, e0_dy, e0_seed;
+  double e1_dx, e1_dy, e1_seed;
+  double e2_dx, e2_dy, e2_seed;
+  double inv_signed_area;
 } edge_walk_t;
 
 typedef struct renderer_s {
@@ -75,9 +81,17 @@ typedef struct renderer_s {
       phong_cam_up_loc, phong_cam_fwd_loc, phong_focal_loc, phong_aspect_loc;
   int phong_boost_loc, phong_time_loc,
       phong_speed_loc; /* speed / boost screen FX */
+  /* split-screen: single-pass shading picks the right camera/light row per
+   * pixel by looking up which viewport rect it falls in */
+  int phong_viewport_rects_loc, phong_viewport_count_loc,
+      phong_buffer_size_loc;
 } renderer;
 
 void render(world *world);
+
+viewport viewport_full_frame(const renderer *renderer);
+viewport compute_kart_viewport(int index, int kart_count, int screen_w,
+                               int screen_h);
 
 void resize_renderer_to(world *world, int display_w, int display_h);
 void resize_renderer(world *world);

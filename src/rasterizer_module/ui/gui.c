@@ -33,14 +33,6 @@ void draw_debug_gui(world *world, float delta_time) {
   }
   draw_normals(world);
 
-  if (!world->settings.show_debug_gui) {
-    world->settings.mouse_over_gui = false;
-    world->settings.text_input_active = false;
-    world->settings.dragging_gui = false;
-    return;
-  }
-  world->settings.text_input_active = false;
-
   static gui_state_t gs = {
       .main_win = {.pos = {10, 10}, .open = true},
       .stats_win = {.pos = {10, 180}, .open = false},
@@ -54,6 +46,18 @@ void draw_debug_gui(world *world, float delta_time) {
       .dd_open = false,
   };
 
+  bool any_pinned = gs.stats_win.pinned || gs.rend_win.pinned || gs.cam_win.pinned ||
+                    gs.physics_win.pinned || gs.kart_win.pinned || gs.scene_win.pinned ||
+                    gs.obj_win.pinned;
+
+  if (!world->settings.show_debug_gui && !any_pinned) {
+    world->settings.mouse_over_gui = false;
+    world->settings.text_input_active = false;
+    world->settings.dragging_gui = false;
+    return;
+  }
+  world->settings.text_input_active = false;
+
   if (gs.sel_mesh >= (int)world->mesh_data_count)
     gs.sel_mesh = 0;
 
@@ -61,25 +65,28 @@ void draw_debug_gui(world *world, float delta_time) {
   {
     const float MAIN_C =
         PAD + ROW_H + GAP + ROW_H + GAP + ROW_H + GAP + ROW_H + PAD;
-    const float STATS_C = PAD + 8.0f * ROW_H + PAD;
-    const float REND_C = PAD + 6.0f * ROW_H + PAD;
+    const float STATS_C = PAD + 19.0f * ROW_H + PAD;
+    const float REND_C = PAD + 10.0f * ROW_H + PAD;
     const float CAM_C = PAD + 6.0f * ROW_H + PAD;
     const float PHYS_C = PAD + 4.0f * ROW_H + PAD;
-    const float KART_C = PAD + 30.0f * ROW_H + PAD;
+    // must track gui_kart.c's own KART_CONTENT formula — that window's
+    // height grows with kart_count (Input Assignment adds one row per kart)
+    const float KART_C = PAD + (31.0f + (float)world->kart_count) * ROW_H + PAD;
     float scene_c = PAD + 2.0f * ROW_H + GAP +
                     (float)world->instance_count * ROW_H + GAP + 4.0f * ROW_H +
                     PAD;
     const float OBJ_C = PAD + 16.0f * ROW_H + 128.0f + GAP + PAD;
     Vector2 m = GetMousePosition();
-    bool over = point_over_win(&gs.main_win, 220.0f, MAIN_C, m) ||
-                point_over_win(&gs.stats_win, 270.0f, STATS_C, m) ||
-                point_over_win(&gs.rend_win, 260.0f, REND_C, m) ||
-                point_over_win(&gs.cam_win, 220.0f, CAM_C, m) ||
-                point_over_win(&gs.scene_win, 220.0f, scene_c, m) ||
-                point_over_win(&gs.obj_win, 300.0f, OBJ_C, m) ||
-                point_over_win(&gs.physics_win, 260.0f, PHYS_C, m) ||
-                point_over_win(&gs.kart_win, 340.0f, KART_C, m) ||
-                gs.dd_open;
+    bool over =
+        (world->settings.show_debug_gui && point_over_win(&gs.main_win, 220.0f, MAIN_C, m)) ||
+        ((world->settings.show_debug_gui || gs.stats_win.pinned) && point_over_win(&gs.stats_win, 340.0f, STATS_C, m)) ||
+        ((world->settings.show_debug_gui || gs.rend_win.pinned) && point_over_win(&gs.rend_win, 260.0f, REND_C, m)) ||
+        ((world->settings.show_debug_gui || gs.cam_win.pinned) && point_over_win(&gs.cam_win, 220.0f, CAM_C, m)) ||
+        ((world->settings.show_debug_gui || gs.scene_win.pinned) && point_over_win(&gs.scene_win, 220.0f, scene_c, m)) ||
+        ((world->settings.show_debug_gui || gs.obj_win.pinned) && point_over_win(&gs.obj_win, 300.0f, OBJ_C, m)) ||
+        ((world->settings.show_debug_gui || gs.physics_win.pinned) && point_over_win(&gs.physics_win, 260.0f, PHYS_C, m)) ||
+        ((world->settings.show_debug_gui || gs.kart_win.pinned) && point_over_win(&gs.kart_win, 340.0f, KART_C, m)) ||
+        (world->settings.show_debug_gui && gs.dd_open);
     world->settings.mouse_over_gui = over;
 
     /* latch drag: if mouse pressed over GUI, stay "over GUI" until released */
@@ -96,20 +103,19 @@ void draw_debug_gui(world *world, float delta_time) {
 
   draw_gizmo(world);
 
-  if (!draw_main_window(world, &gs, delta_time)) {
-    world->settings.show_debug_gui = false;
-    world->cam = &world->game_cam;
-    gs.main_win.open = true;
-    return;
+  if (world->settings.show_debug_gui) {
+    if (!draw_main_window(world, &gs, delta_time)) {
+      world->settings.show_debug_gui = false;
+      world->cam = &world->game_cams[0];
+      gs.main_win.open = true;
+    }
   }
 
-  draw_stats_window(world, &gs, delta_time);
-  draw_renderer_window(world, &gs);
-
-  draw_camera_window(world, &gs);
-  draw_physics_window(world, &gs);
-  draw_kart_window(world, &gs);
-
-  draw_scene_window(world, &gs, delta_time);
-  draw_object_window(world, &gs);
+  if (world->settings.show_debug_gui || gs.stats_win.pinned) draw_stats_window(world, &gs, delta_time);
+  if (world->settings.show_debug_gui || gs.rend_win.pinned) draw_renderer_window(world, &gs);
+  if (world->settings.show_debug_gui || gs.cam_win.pinned) draw_camera_window(world, &gs);
+  if (world->settings.show_debug_gui || gs.physics_win.pinned) draw_physics_window(world, &gs);
+  if (world->settings.show_debug_gui || gs.kart_win.pinned) draw_kart_window(world, &gs);
+  if (world->settings.show_debug_gui || gs.scene_win.pinned) draw_scene_window(world, &gs, delta_time);
+  if (world->settings.show_debug_gui || gs.obj_win.pinned) draw_object_window(world, &gs);
 }

@@ -23,33 +23,33 @@
 INTERNAL_INLINE void setup_edge_walk(vec3f p0, vec3f p1, vec3f p2, float seed_x,
                                      float seed_y, edge_walk_t *ew) {
   // signed area — positive = CCW winding in screen space (Y-down)
-  float signed_area =
-      (p2.x - p0.x) * (p1.y - p0.y) - (p2.y - p0.y) * (p1.x - p0.x);
-  ew->inv_signed_area = 1.0f / signed_area;
+  double signed_area =
+      (double)(p2.x - p0.x) * (double)(p1.y - p0.y) - (double)(p2.y - p0.y) * (double)(p1.x - p0.x);
+  ew->inv_signed_area = 1.0 / signed_area;
 
   // dw/dx (e*_dx) and dw/dy (e*_dy) for each edge — constant across triangle,
   // so the inner loop needs only one add per edge per step, not a full cross
   // product
-  ew->e0_dx = p2.y - p1.y;
-  ew->e0_dy = p1.x - p2.x;
-  ew->e1_dx = p0.y - p2.y;
-  ew->e1_dy = p2.x - p0.x;
-  ew->e2_dx = p1.y - p0.y;
-  ew->e2_dy = p0.x - p1.x;
+  ew->e0_dx = (double)p2.y - (double)p1.y;
+  ew->e0_dy = (double)p1.x - (double)p2.x;
+  ew->e1_dx = (double)p0.y - (double)p2.y;
+  ew->e1_dy = (double)p2.x - (double)p0.x;
+  ew->e2_dx = (double)p1.y - (double)p0.y;
+  ew->e2_dy = (double)p0.x - (double)p1.x;
 
   // evaluate all three edge functions at the first pixel center (+0.5 = center,
   // not corner)
   ew->e0_seed =
-      (seed_x - p1.x) * (p2.y - p1.y) - (seed_y - p1.y) * (p2.x - p1.x);
+      ((double)seed_x - (double)p1.x) * ((double)p2.y - (double)p1.y) - ((double)seed_y - (double)p1.y) * ((double)p2.x - (double)p1.x);
   ew->e1_seed =
-      (seed_x - p2.x) * (p0.y - p2.y) - (seed_y - p2.y) * (p0.x - p2.x);
+      ((double)seed_x - (double)p2.x) * ((double)p0.y - (double)p2.y) - ((double)seed_y - (double)p2.y) * ((double)p0.x - (double)p2.x);
   ew->e2_seed =
-      (seed_x - p0.x) * (p1.y - p0.y) - (seed_y - p0.y) * (p1.x - p0.x);
+      ((double)seed_x - (double)p0.x) * ((double)p1.y - (double)p0.y) - ((double)seed_y - (double)p0.y) * ((double)p1.x - (double)p0.x);
 
   // CW-wound triangles produce signed_area < 0, making all weights negative
   // inside. Negate steps, seeds and inv_signed_area so "inside = all e >= 0"
   // works for either winding.
-  if (signed_area < 0.f) {
+  if (signed_area < 0.0) {
     ew->e0_dx = -ew->e0_dx;
     ew->e0_dy = -ew->e0_dy;
     ew->e0_seed = -ew->e0_seed;
@@ -63,12 +63,36 @@ INTERNAL_INLINE void setup_edge_walk(vec3f p0, vec3f p1, vec3f p2, float seed_x,
   }
 }
 
+// Narrows [*lo, *hi] to the tightest subrange where edge function
+// e(col) = e_row + (col - rowStartX) * e_dx could satisfy e(col) >= edge_bias.
+// Only ever narrows, never widens. Sets *row_excluded if this edge rules out
+// the entire row.
+INTERNAL_INLINE void narrow_edge_bound(double e_row, double e_dx,
+                                     double edge_bias, int rowStartX, int *lo,
+                                     int *hi, bool *row_excluded) {
+  const double kSlopeEps = 1e-9;
+  if (e_dx > kSlopeEps) {
+    double col_bound = (double)rowStartX + (edge_bias - e_row) / e_dx;
+    int new_lo = (int)floor(col_bound);
+    if (new_lo > *lo)
+      *lo = new_lo;
+  } else if (e_dx < -kSlopeEps) {
+    double col_bound = (double)rowStartX + (edge_bias - e_row) / e_dx;
+    int new_hi = (int)ceil(col_bound);
+    if (new_hi < *hi)
+      *hi = new_hi;
+  } else if (e_row < edge_bias) {
+    *row_excluded = true;
+  }
+}
+
 // Returns the color for one pixel given its barycentric coords and depth.
 // Perspective-correct texture lookup if st->tex is set, otherwise flat_color.
 INTERNAL_INLINE Color fetch_pixel_albedo(const screen_tri_t *st, float b0,
-                                         float b1, float b2, float inv_depth) {
+                                         float b1, float b2, float inv_depth,
+                                         bool skip_texture) {
   Color base;
-  if (st->tex) {
+  if (st->tex && !skip_texture) {
     const vec2f uv0 = st->uv[0], uv1 = st->uv[1], uv2 = st->uv[2];
     const float inv_z0 = st->inv_z[0], inv_z1 = st->inv_z[1],
                 inv_z2 = st->inv_z[2];
@@ -104,7 +128,10 @@ void draw_triangle_pixels_tiled(depthbuffer *depthbuffer,
                                 albedobuffer *albedobuffer,
                                 normalbuffer *normalbuffer, int screen_width,
                                 const screen_tri_t *st, int clip_x0,
-                                int clip_y0, int clip_x1, int clip_y1) {
+                                int clip_y0, int clip_x1, int clip_y1,
+                                long *iter, long *edge_pass, long *depth_pass,
+                                bool skip_texture, bool skip_normalbuffer,
+                                bool skip_albedobuffer, bool skip_framebuffer) {
   // clip triangle bbox to tile bounds: triangle may span multiple tiles
   int startX = st->bx0 > clip_x0 ? st->bx0 : clip_x0;
   int startY = st->by0 > clip_y0 ? st->by0 : clip_y0;
@@ -127,21 +154,56 @@ void draw_triangle_pixels_tiled(depthbuffer *depthbuffer,
   // e >= edge_bias less strict than e >= 0, so fringe pixels just outside
   // shared triangle edges are included and fill the gap instead of leaving dark
   // seams
-  float edge_bias = -st->fp_bias;
+  double edge_bias = -(double)st->fp_bias;
   for (int row = startY; row <= endY; row++) {
     int dy = row - startY;
-    float e0 = ew.e0_seed + dy * ew.e0_dy;
-    float e1 = ew.e1_seed + dy * ew.e1_dy;
-    float e2 = ew.e2_seed + dy * ew.e2_dy;
+    double e0 = ew.e0_seed + (double)dy * ew.e0_dy;
+    double e1 = ew.e1_seed + (double)dy * ew.e1_dy;
+    double e2 = ew.e2_seed + (double)dy * ew.e2_dy;
     int row_offset = row * screen_width;
-    for (int col = startX; col <= endX; col++) {
+
+    // scanline x-range tightening: most of [startX, endX] is outside the
+    // triangle (bbox/tile binning is coarse), so bound the row analytically
+    // before brute-testing every column. Padded by 1px and still gated by
+    // the same exact per-pixel test below, so this can only skip pixels
+    // that are provably always-false, never one the old scan would include.
+    int rowLo = startX, rowHi = endX;
+    bool row_excluded = false;
+    narrow_edge_bound(e0, ew.e0_dx, edge_bias, startX, &rowLo, &rowHi,
+                      &row_excluded);
+    narrow_edge_bound(e1, ew.e1_dx, edge_bias, startX, &rowLo, &rowHi,
+                      &row_excluded);
+    narrow_edge_bound(e2, ew.e2_dx, edge_bias, startX, &rowLo, &rowHi,
+                      &row_excluded);
+
+    if (row_excluded || rowLo > rowHi) {
+      continue;
+    }
+
+    rowLo -= 1;
+    rowHi += 1;
+    if (rowLo < startX)
+      rowLo = startX;
+    if (rowHi > endX)
+      rowHi = endX;
+
+    if (rowLo > startX) {
+      double advance = (double)(rowLo - startX);
+      e0 += advance * ew.e0_dx;
+      e1 += advance * ew.e1_dx;
+      e2 += advance * ew.e2_dx;
+    }
+
+    for (int col = rowLo; col <= rowHi; col++) {
+      (*iter)++;
       if ((e0 >= edge_bias) && (e1 >= edge_bias) && (e2 >= edge_bias)) {
+        (*edge_pass)++;
         // clamp biased-outside weights to 0 before normalizing: fringe pixels
         // that passed via bias must still produce valid (non-negative)
         // barycentric coords
-        float b0 = fmaxf(e0, 0.f) * ew.inv_signed_area;
-        float b1 = fmaxf(e1, 0.f) * ew.inv_signed_area;
-        float b2 = fmaxf(e2, 0.f) * ew.inv_signed_area;
+        float b0 = (float)fmax(e0, 0.0) * (float)ew.inv_signed_area;
+        float b1 = (float)fmax(e1, 0.0) * (float)ew.inv_signed_area;
+        float b2 = (float)fmax(e2, 0.0) * (float)ew.inv_signed_area;
         // 1/z is linear in screen space, so interpolating inv_z barycentrically
         // gives perspective-correct depth without a per-pixel divide
         float inv_depth = b0 * inv_z0 + b1 * inv_z1 + b2 * inv_z2;
@@ -155,16 +217,18 @@ void draw_triangle_pixels_tiled(depthbuffer *depthbuffer,
         }
         int pixel_idx = row_offset + col;
         if (inv_depth > depthbuffer[pixel_idx]) {
+          (*depth_pass)++;
           depthbuffer[pixel_idx] = inv_depth;
 
           if (idbuffer) {
             idbuffer[pixel_idx] = instance_id;
           }
 
-          if (framebuffer) {
-            Color albedo = fetch_pixel_albedo(st, b0, b1, b2, inv_depth);
+          if (framebuffer && !skip_framebuffer) {
+            Color albedo =
+                fetch_pixel_albedo(st, b0, b1, b2, inv_depth, skip_texture);
             framebuffer[pixel_idx] = color_scale(albedo, st->light_rgb);
-            if (albedobuffer) {
+            if (albedobuffer && !skip_albedobuffer) {
               float z = 1.0f / inv_depth;
               float shade = ((b0 * st->shadow[0] * inv_z0) +
                              (b1 * st->shadow[1] * inv_z1) +
@@ -178,7 +242,7 @@ void draw_triangle_pixels_tiled(depthbuffer *depthbuffer,
             }
           }
 
-          if (normalbuffer) {
+          if (normalbuffer && !skip_normalbuffer) {
             // interpolate same as for inv_depth. no perspective correcting
             // needed, as normals are not texture coordinates
             vec3f n = (vec3f){
@@ -206,20 +270,28 @@ void draw_triangle_pixels_tiled(depthbuffer *depthbuffer,
   }
 }
 
-void draw_tiles_parallel(world *world, const int num_tiles,
+void draw_tiles_parallel(world *world, const viewport *vp, const int num_tiles,
                          const int tile_count_buf[MAX_TILES],
                          const int tile_start_buf[MAX_TILES],
                          const int bin_buf[MAX_BIN_ENTRIES],
                          const screen_tri_t screen_triangles[MAX_SCREEN_TRIS],
-                         const int tiles_x) {
+                         const int tiles_x, long *iter, long *edge_pass,
+                         long *depth_pass) {
   depthbuffer *depthbuffer = world->renderer->depthbuffer;
   framebuffer *framebuffer = world->renderer->framebuffer;
   idbuffer *idbuffer =
       world->settings.show_debug_gui ? world->renderer->idbuffer : NULL;
   albedobuffer *albedobuffer = world->renderer->albedobuffer;
   normalbuffer *normalbuffer = world->renderer->normalbuffer;
+  
+  bool skip_texture = world->settings.debug_skip_texture;
+  bool skip_normalbuffer = world->settings.debug_skip_normalbuffer;
+  bool skip_albedobuffer = world->settings.debug_skip_albedobuffer;
+  bool skip_framebuffer = world->settings.debug_skip_framebuffer;
 
-#pragma omp parallel for schedule(dynamic)
+  long local_iter = 0, local_edge = 0, local_depth = 0;
+
+#pragma omp parallel for schedule(dynamic) reduction(+:local_iter, local_edge, local_depth) if (vp->h > world->settings.parallel_cutoff_rows)
   for (int tile_index = 0; tile_index < num_tiles; tile_index++) {
     // skip if tile buffer is empty
     if (tile_count_buf[tile_index] == 0)
@@ -227,9 +299,8 @@ void draw_tiles_parallel(world *world, const int num_tiles,
 
     // convert tile coordinates back to actual coordinates
     int x0, x1, y0, y1;
-    tile_coordinates_to_triangle_coordinates(
-        tile_index, tiles_x, world->renderer->screen_width,
-        world->renderer->screen_height, &x0, &x1, &y0, &y1);
+    tile_coordinates_to_triangle_coordinates(tile_index, tiles_x, vp->x, vp->y,
+                                             vp->w, vp->h, &x0, &x1, &y0, &y1);
     int end = tile_start_buf[tile_index] + tile_count_buf[tile_index];
 
     // draw the actual triangles in the bin
@@ -237,7 +308,12 @@ void draw_tiles_parallel(world *world, const int num_tiles,
       draw_triangle_pixels_tiled(
           depthbuffer, framebuffer, idbuffer, albedobuffer, normalbuffer,
           world->renderer->screen_width, &screen_triangles[bin_buf[bin_id]], x0,
-          y0, x1, y1);
+          y0, x1, y1, &local_iter, &local_edge, &local_depth, skip_texture,
+          skip_normalbuffer, skip_albedobuffer, skip_framebuffer);
   }
+
+  *iter += local_iter;
+  *edge_pass += local_edge;
+  *depth_pass += local_depth;
 }
 

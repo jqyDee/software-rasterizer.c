@@ -42,7 +42,7 @@ void init_karts(world *world, size_t player_count) {
     exit(2);
 
   for (size_t i = 0; i < player_count; i++) {
-    kart_create(&world->karts[i], i);
+    kart_create(&world->karts[i], (int)i);
   }
   world->kart_count = player_count;
 }
@@ -212,6 +212,28 @@ void kart_sync_instances(world *world) {
     inst->rotation.y = kart->yaw * RAD_TO_DEG + kart->visual_drift_yaw;
     inst->rotation.z = kart->visual_lean;
     inst->scale = (vec3f){0.05f, 0.05f, 0.05f};
+  }
+}
+
+// Camera follow (game mode only): trails the kart's smoothed TRAVEL heading
+// (cam_yaw, eased in kart_update) — not the nose — so drift rotation is
+// visible on screen instead of cancelled out.
+void kart_update_cameras(world *world) {
+  for (size_t i = 0; i < world->kart_count; i++) {
+    kart *player_kart = &world->karts[i];
+    vec3f heading = rotate_y((vec3f){0, 0, 1}, player_kart->cam_yaw);
+    world->game_cams[i].pos =
+        vec_add(player_kart->pos, vec_scale(heading, -6.0f));
+    world->game_cams[i].pos.y += 1.4f;
+    world->game_cams[i].yaw = player_kart->cam_yaw;
+    world->game_cams[i].pitch = 0.15f; // positive pitch = look down
+
+    // FOV punch while boosting: wide angle = perceived speed. focal_length
+    // must follow fov (init_cam computes it only once).
+    float fov = 60.0f + 14.0f * player_kart->boost_visual;
+    world->game_cams[i].fov = fov;
+    world->game_cams[i].focal_length =
+        1.0f / tanf(fov * ((float)M_PI / 180.0f) * 0.5f);
   }
 }
 

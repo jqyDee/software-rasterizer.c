@@ -55,4 +55,10 @@ void init_shaders(renderer *renderer) {
       GetShaderLocation(renderer->phong_shader, "lightCount");
   renderer->phong_ambient_loc =
       GetShaderLocation(renderer->phong_shader, "ambient");
+  renderer->phong_viewport_rects_loc =
+      GetShaderLocation(renderer->phong_shader, "viewportRects");
+  renderer->phong_viewport_count_loc =
+      GetShaderLocation(renderer->phong_shader, "viewportCount");
+  renderer->phong_buffer_size_loc =
+      GetShaderLocation(renderer->phong_shader, "bufferSize");
 }

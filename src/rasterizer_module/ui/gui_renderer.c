@@ -5,7 +5,7 @@
 
 void draw_renderer_window(world *world, gui_state_t *gs) {
   const float REND_W = 260.0f;
-  const float REND_CONTENT = PAD + 6.0f * ROW_H + PAD;
+  const float REND_CONTENT = PAD + 10.0f * ROW_H + PAD;
 
   if (do_window(&gs->rend_win, "Renderer", REND_W, REND_CONTENT)) {
     float x = gs->rend_win.pos.x + PAD;
@@ -64,5 +64,26 @@ void draw_renderer_window(world *world, gui_state_t *gs) {
     }
     GuiSlider((Rectangle){cx, y, cw, ROW_H - 4}, NULL, NULL,
               &world->settings.seam_bias, 0.0f, 8.0f);
+    y += ROW_H;
+
+    // raster cost isolation — flip live, watch "- raster: X ms" in Stats
+    GuiLabel((Rectangle){x, y, LABEL_W, ROW_H}, "Skip texture");
+    GuiCheckBox((Rectangle){cx, y + 4, ROW_H - 8, ROW_H - 8}, NULL,
+                &world->settings.debug_skip_texture);
+    y += ROW_H;
+
+    GuiLabel((Rectangle){x, y, LABEL_W, ROW_H}, "Skip normal buf");
+    GuiCheckBox((Rectangle){cx, y + 4, ROW_H - 8, ROW_H - 8}, NULL,
+                &world->settings.debug_skip_normalbuffer);
+    y += ROW_H;
+
+    GuiLabel((Rectangle){x, y, LABEL_W, ROW_H}, "Skip albedo buf");
+    GuiCheckBox((Rectangle){cx, y + 4, ROW_H - 8, ROW_H - 8}, NULL,
+                &world->settings.debug_skip_albedobuffer);
+    y += ROW_H;
+
+    GuiLabel((Rectangle){x, y, LABEL_W, ROW_H}, "Skip framebuf");
+    GuiCheckBox((Rectangle){cx, y + 4, ROW_H - 8, ROW_H - 8}, NULL,
+                &world->settings.debug_skip_framebuffer);
   }
 }

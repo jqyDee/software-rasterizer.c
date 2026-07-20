@@ -9,7 +9,29 @@ extern void draw_triangle_pixels_tiled(float *depthbuffer, Color *framebuffer,
                                        int *idbuffer, Color *albedobuffer,
                                        Color *normalbuffer, int screen_width,
                                        const screen_tri_t *st, int clip_x0,
-                                       int clip_y0, int clip_x1, int clip_y1);
+                                       int clip_y0, int clip_x1, int clip_y1,
+                                       long *iter, long *edge_pass,
+                                       long *depth_pass, bool skip_texture,
+                                       bool skip_normalbuffer,
+                                       bool skip_albedobuffer,
+                                       bool skip_framebuffer);
+
+extern void narrow_edge_bound(double e_row, double e_dx, double edge_bias,
+                              int rowStartX, int *lo, int *hi,
+                              bool *row_excluded);
+
+/* pre-session-instrumentation convenience wrapper: all toggles off, counters
+ * discarded — identical behavior to the old 11-arg signature */
+static void call_draw(float *depthbuffer, Color *framebuffer, int *idbuffer,
+                      Color *albedobuffer, Color *normalbuffer,
+                      int screen_width, const screen_tri_t *st, int clip_x0,
+                      int clip_y0, int clip_x1, int clip_y1) {
+  long iter = 0, edge_pass = 0, depth_pass = 0;
+  draw_triangle_pixels_tiled(depthbuffer, framebuffer, idbuffer, albedobuffer,
+                             normalbuffer, screen_width, st, clip_x0, clip_y0,
+                             clip_x1, clip_y1, &iter, &edge_pass, &depth_pass,
+                             false, false, false, false);
+}
 
 #define W 8
 #define H 8
@@ -56,7 +78,7 @@ static screen_tri_t base_tri(Color color) {
 
 void test_pixel_inside_colored(void) {
   screen_tri_t st = base_tri(COL_RED);
-  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
+  call_draw(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
                              H - 1);
   TEST_ASSERT_EQUAL_UINT8(255, fb[2 * W + 2].r);
   TEST_ASSERT_EQUAL_UINT8(0, fb[2 * W + 2].g);
@@ -64,7 +86,7 @@ void test_pixel_inside_colored(void) {
 
 void test_pixel_outside_unchanged(void) {
   screen_tri_t st = base_tri(COL_RED);
-  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
+  call_draw(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
                              H - 1);
   /* (6,6) outside triangle */
   TEST_ASSERT_EQUAL_UINT8(0, fb[6 * W + 6].r);
@@ -72,7 +94,7 @@ void test_pixel_outside_unchanged(void) {
 
 void test_depth_written_for_covered_pixel(void) {
   screen_tri_t st = base_tri(COL_RED);
-  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
+  call_draw(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
                              H - 1);
   TEST_ASSERT_TRUE(depth[2 * W + 2] > 0.0f);
 }
@@ -81,12 +103,12 @@ void test_depth_written_for_covered_pixel(void) {
 
 void test_depth_test_rejects_farther_triangle(void) {
   screen_tri_t near = base_tri(COL_RED);
-  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, NULL, W, &near, 0, 0,
+  call_draw(depth, fb, NULL, NULL, NULL, W, &near, 0, 0,
                              W - 1, H - 1);
 
   screen_tri_t far = base_tri(COL_GREEN);
   far.inv_z[0] = far.inv_z[1] = far.inv_z[2] = 0.25f; /* z=4, farther */
-  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, NULL, W, &far, 0, 0,
+  call_draw(depth, fb, NULL, NULL, NULL, W, &far, 0, 0,
                              W - 1, H - 1);
 
   /* red (first draw) should survive */
@@ -96,12 +118,12 @@ void test_depth_test_rejects_farther_triangle(void) {
 
 void test_depth_test_accepts_closer_triangle(void) {
   screen_tri_t far = base_tri(COL_RED);
-  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, NULL, W, &far, 0, 0,
+  call_draw(depth, fb, NULL, NULL, NULL, W, &far, 0, 0,
                              W - 1, H - 1);
 
   screen_tri_t near = base_tri(COL_GREEN);
   near.inv_z[0] = near.inv_z[1] = near.inv_z[2] = 1.0f; /* z=1, closer */
-  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, NULL, W, &near, 0, 0,
+  call_draw(depth, fb, NULL, NULL, NULL, W, &near, 0, 0,
                              W - 1, H - 1);
 
   /* green (closer) should overwrite */
@@ -114,7 +136,7 @@ void test_depth_test_accepts_closer_triangle(void) {
 void test_clip_excludes_pixel_left_of_bound(void) {
   screen_tri_t st = base_tri(COL_RED);
   /* clip_x0=4 excludes pixel column 2 */
-  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, NULL, W, &st, 4, 0, W - 1,
+  call_draw(depth, fb, NULL, NULL, NULL, W, &st, 4, 0, W - 1,
                              H - 1);
   TEST_ASSERT_EQUAL_UINT8(0, fb[2 * W + 2].r);
 }
@@ -122,7 +144,7 @@ void test_clip_excludes_pixel_left_of_bound(void) {
 void test_clip_excludes_pixel_above_bound(void) {
   screen_tri_t st = base_tri(COL_RED);
   /* clip_y0=4 excludes pixel row 2 */
-  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, NULL, W, &st, 0, 4, W - 1,
+  call_draw(depth, fb, NULL, NULL, NULL, W, &st, 0, 4, W - 1,
                              H - 1);
   TEST_ASSERT_EQUAL_UINT8(0, fb[2 * W + 2].r);
 }
@@ -135,7 +157,7 @@ void test_cw_triangle_covers_interior_pixel(void) {
   vec3f tmp_v  = st.v[1];    st.v[1]    = st.v[2];    st.v[2]    = tmp_v;
   float tmp_iz = st.inv_z[1]; st.inv_z[1] = st.inv_z[2]; st.inv_z[2] = tmp_iz;
   vec2f tmp_uv = st.uv[1];   st.uv[1]   = st.uv[2];   st.uv[2]   = tmp_uv;
-  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
+  call_draw(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
                              H - 1);
   /* pixel (2,2) is inside regardless of winding — normalization must fix it */
   TEST_ASSERT_EQUAL_UINT8(255, fb[2 * W + 2].r);
@@ -145,7 +167,7 @@ void test_cw_triangle_outside_pixel_unchanged(void) {
   screen_tri_t st = base_tri(COL_RED);
   vec3f tmp_v  = st.v[1];    st.v[1]    = st.v[2];    st.v[2]    = tmp_v;
   float tmp_iz = st.inv_z[1]; st.inv_z[1] = st.inv_z[2]; st.inv_z[2] = tmp_iz;
-  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
+  call_draw(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
                              H - 1);
   TEST_ASSERT_EQUAL_UINT8(0, fb[6 * W + 6].r);
 }
@@ -160,7 +182,7 @@ void test_texture_1x1_sampled_for_any_uv(void) {
   st.uv[0] = (vec2f){0.0f, 0.0f};
   st.uv[1] = (vec2f){1.0f, 0.0f};
   st.uv[2] = (vec2f){0.0f, 1.0f};
-  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
+  call_draw(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
                              H - 1);
   TEST_ASSERT_EQUAL_UINT8(11, fb[2 * W + 2].r);
   TEST_ASSERT_EQUAL_UINT8(22, fb[2 * W + 2].g);
@@ -171,7 +193,7 @@ void test_texture_overrides_flat_color(void) {
   Color tex[1] = {{99, 99, 99, 255}};
   screen_tri_t st = base_tri(COL_RED);
   st.tex = tex; st.tex_w = 1; st.tex_h = 1;
-  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
+  call_draw(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
                              H - 1);
   /* flat_color is red, but texture should win */
   TEST_ASSERT_EQUAL_UINT8(99, fb[2 * W + 2].r);
@@ -192,7 +214,7 @@ void test_texture_uv_wrapping(void) {
   st.tex = tex; st.tex_w = 2; st.tex_h = 2;
   vec2f uv = {1.5f, 0.0f};
   st.uv[0] = st.uv[1] = st.uv[2] = uv;
-  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
+  call_draw(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
                              H - 1);
   TEST_ASSERT_EQUAL_UINT8(255, fb[2 * W + 2].r);
   TEST_ASSERT_EQUAL_UINT8(255, fb[2 * W + 2].g);
@@ -212,7 +234,7 @@ void test_texture_v_flip(void) {
   st.tex = tex; st.tex_w = 2; st.tex_h = 2;
   vec2f uv = {0.25f, 0.0f}; /* v=0 should land on row1 after flip */
   st.uv[0] = st.uv[1] = st.uv[2] = uv;
-  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
+  call_draw(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
                              H - 1);
   TEST_ASSERT_EQUAL_UINT8(0,   fb[2 * W + 2].r);
   TEST_ASSERT_EQUAL_UINT8(200, fb[2 * W + 2].g);
@@ -225,14 +247,14 @@ void test_idbuffer_written_for_covered_pixel(void) {
   memset(idbuf, -1, sizeof(idbuf));
   screen_tri_t st = base_tri(COL_RED);
   st.instance_id = 7;
-  draw_triangle_pixels_tiled(depth, fb, idbuf, NULL, NULL, W, &st, 0, 0,
+  call_draw(depth, fb, idbuf, NULL, NULL, W, &st, 0, 0,
                              W - 1, H - 1);
   TEST_ASSERT_EQUAL_INT(7, idbuf[2 * W + 2]);
 }
 
 void test_idbuffer_null_no_crash(void) {
   screen_tri_t st = base_tri(COL_RED);
-  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
+  call_draw(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
                              H - 1);
   TEST_ASSERT_EQUAL_UINT8(255, fb[2 * W + 2].r); /* still drew */
 }
@@ -245,7 +267,7 @@ void test_albedobuffer_written_unlit(void) {
   memset(albedo, 0, sizeof(albedo));
   screen_tri_t st = base_tri(COL_RED);
   st.light_rgb = (vec3f){0.2f, 0.2f, 0.2f}; /* dims the lit framebuffer */
-  draw_triangle_pixels_tiled(depth, fb, NULL, albedo, NULL, W, &st, 0, 0,
+  call_draw(depth, fb, NULL, albedo, NULL, W, &st, 0, 0,
                              W - 1, H - 1);
   /* albedo keeps the unlit flat_color regardless of light_rgb */
   TEST_ASSERT_EQUAL_UINT8(255, albedo[2 * W + 2].r);
@@ -256,7 +278,7 @@ void test_albedobuffer_written_unlit(void) {
 
 void test_albedobuffer_null_no_crash(void) {
   screen_tri_t st = base_tri(COL_RED);
-  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
+  call_draw(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
                              H - 1);
   TEST_ASSERT_EQUAL_UINT8(255, fb[2 * W + 2].r); /* still drew */
 }
@@ -269,7 +291,7 @@ void test_normalbuffer_encodes_flat_normal(void) {
   memset(normalbuf, 0, sizeof(normalbuf));
   screen_tri_t st = base_tri(COL_RED);
   st.normals[0] = st.normals[1] = st.normals[2] = (vec3f){0.0f, 0.0f, 1.0f};
-  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, normalbuf, W, &st, 0, 0,
+  call_draw(depth, fb, NULL, NULL, normalbuf, W, &st, 0, 0,
                              W - 1, H - 1);
   TEST_ASSERT_UINT8_WITHIN(1, 128, normalbuf[2 * W + 2].r);
   TEST_ASSERT_UINT8_WITHIN(1, 128, normalbuf[2 * W + 2].g);
@@ -278,9 +300,121 @@ void test_normalbuffer_encodes_flat_normal(void) {
 
 void test_normalbuffer_null_no_crash(void) {
   screen_tri_t st = base_tri(COL_RED);
-  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
+  call_draw(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
                              H - 1);
   TEST_ASSERT_EQUAL_UINT8(255, fb[2 * W + 2].r); /* still drew */
+}
+
+/* ---- narrow_edge_bound: scanline x-range tightening ---- */
+
+void test_narrow_edge_bound_positive_slope_narrows_lo(void) {
+  /* e(col) = e_row + (col - rowStartX) * e_dx; e(col) >= edge_bias solved
+     for col with e_dx=2, e_row=0, edge_bias=0, rowStartX=10 -> col >= 10 */
+  int lo = 5, hi = 20;
+  bool excluded = false;
+  narrow_edge_bound(0.0, 2.0, 0.0, 10, &lo, &hi, &excluded);
+  TEST_ASSERT_EQUAL_INT(10, lo);
+  TEST_ASSERT_EQUAL_INT(20, hi); /* untouched */
+  TEST_ASSERT_FALSE(excluded);
+}
+
+void test_narrow_edge_bound_negative_slope_narrows_hi(void) {
+  /* e_dx=-2 -> dividing flips direction -> col <= 10 */
+  int lo = 5, hi = 20;
+  bool excluded = false;
+  narrow_edge_bound(0.0, -2.0, 0.0, 10, &lo, &hi, &excluded);
+  TEST_ASSERT_EQUAL_INT(5, lo); /* untouched */
+  TEST_ASSERT_EQUAL_INT(10, hi);
+  TEST_ASSERT_FALSE(excluded);
+}
+
+void test_narrow_edge_bound_flat_edge_inside_imposes_no_constraint(void) {
+  int lo = 5, hi = 20;
+  bool excluded = false;
+  narrow_edge_bound(1.0, 0.0, 0.0, 10, &lo, &hi, &excluded);
+  TEST_ASSERT_EQUAL_INT(5, lo);
+  TEST_ASSERT_EQUAL_INT(20, hi);
+  TEST_ASSERT_FALSE(excluded);
+}
+
+void test_narrow_edge_bound_flat_edge_outside_excludes_row(void) {
+  int lo = 5, hi = 20;
+  bool excluded = false;
+  narrow_edge_bound(-1.0, 0.0, 0.0, 10, &lo, &hi, &excluded);
+  TEST_ASSERT_TRUE(excluded);
+}
+
+void test_narrow_edge_bound_never_widens_lo(void) {
+  /* computed bound (10) is looser than the already-tighter input lo (15) —
+     must not loosen it back down */
+  int lo = 15, hi = 20;
+  bool excluded = false;
+  narrow_edge_bound(0.0, 2.0, 0.0, 10, &lo, &hi, &excluded);
+  TEST_ASSERT_EQUAL_INT(15, lo);
+}
+
+void test_narrow_edge_bound_never_widens_hi(void) {
+  int lo = 5, hi = 5;
+  bool excluded = false;
+  narrow_edge_bound(0.0, -2.0, 0.0, 10, &lo, &hi, &excluded);
+  TEST_ASSERT_EQUAL_INT(5, hi);
+}
+
+/* ---- raster cost-isolation toggles ---- */
+
+void test_skip_texture_uses_flat_color(void) {
+  Color tex[1] = {{99, 99, 99, 255}};
+  screen_tri_t st = base_tri(COL_RED);
+  st.tex = tex; st.tex_w = 1; st.tex_h = 1;
+  long iter = 0, edge_pass = 0, depth_pass = 0;
+  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, NULL, W, &st, 0, 0, W - 1,
+                             H - 1, &iter, &edge_pass, &depth_pass,
+                             /*skip_texture*/ true, false, false, false);
+  /* flat_color (red), not the texture sample */
+  TEST_ASSERT_EQUAL_UINT8(255, fb[2 * W + 2].r);
+  TEST_ASSERT_EQUAL_UINT8(0, fb[2 * W + 2].g);
+}
+
+void test_skip_normalbuffer_leaves_buffer_untouched(void) {
+  Color normalbuf[W * H];
+  memset(normalbuf, 0, sizeof(normalbuf));
+  screen_tri_t st = base_tri(COL_RED);
+  st.normals[0] = st.normals[1] = st.normals[2] = (vec3f){0.0f, 0.0f, 1.0f};
+  long iter = 0, edge_pass = 0, depth_pass = 0;
+  draw_triangle_pixels_tiled(depth, fb, NULL, NULL, normalbuf, W, &st, 0, 0,
+                             W - 1, H - 1, &iter, &edge_pass, &depth_pass,
+                             false, /*skip_normalbuffer*/ true, false, false);
+  TEST_ASSERT_EQUAL_UINT8(0, normalbuf[2 * W + 2].r);
+  TEST_ASSERT_EQUAL_UINT8(0, normalbuf[2 * W + 2].g);
+  TEST_ASSERT_EQUAL_UINT8(0, normalbuf[2 * W + 2].b);
+  /* other buffers unaffected by this toggle */
+  TEST_ASSERT_EQUAL_UINT8(255, fb[2 * W + 2].r);
+}
+
+void test_skip_albedobuffer_leaves_buffer_untouched(void) {
+  Color albedo[W * H];
+  memset(albedo, 0, sizeof(albedo));
+  screen_tri_t st = base_tri(COL_RED);
+  long iter = 0, edge_pass = 0, depth_pass = 0;
+  draw_triangle_pixels_tiled(depth, fb, NULL, albedo, NULL, W, &st, 0, 0,
+                             W - 1, H - 1, &iter, &edge_pass, &depth_pass,
+                             false, false, /*skip_albedobuffer*/ true, false);
+  TEST_ASSERT_EQUAL_UINT8(0, albedo[2 * W + 2].r);
+  TEST_ASSERT_EQUAL_UINT8(255, fb[2 * W + 2].r);
+}
+
+void test_skip_framebuffer_leaves_framebuffer_and_albedo_untouched(void) {
+  /* albedobuffer write is nested inside the framebuffer block, so skipping
+     the framebuffer skips both */
+  Color albedo[W * H];
+  memset(albedo, 0, sizeof(albedo));
+  screen_tri_t st = base_tri(COL_RED);
+  long iter = 0, edge_pass = 0, depth_pass = 0;
+  draw_triangle_pixels_tiled(depth, fb, NULL, albedo, NULL, W, &st, 0, 0,
+                             W - 1, H - 1, &iter, &edge_pass, &depth_pass,
+                             false, false, false, /*skip_framebuffer*/ true);
+  TEST_ASSERT_EQUAL_UINT8(0, fb[2 * W + 2].r); /* still COL_BLACK (setUp) */
+  TEST_ASSERT_EQUAL_UINT8(0, albedo[2 * W + 2].r);
 }
 
 int main(void) {
@@ -304,5 +438,15 @@ int main(void) {
   RUN_TEST(test_albedobuffer_null_no_crash);
   RUN_TEST(test_normalbuffer_encodes_flat_normal);
   RUN_TEST(test_normalbuffer_null_no_crash);
+  RUN_TEST(test_narrow_edge_bound_positive_slope_narrows_lo);
+  RUN_TEST(test_narrow_edge_bound_negative_slope_narrows_hi);
+  RUN_TEST(test_narrow_edge_bound_flat_edge_inside_imposes_no_constraint);
+  RUN_TEST(test_narrow_edge_bound_flat_edge_outside_excludes_row);
+  RUN_TEST(test_narrow_edge_bound_never_widens_lo);
+  RUN_TEST(test_narrow_edge_bound_never_widens_hi);
+  RUN_TEST(test_skip_texture_uses_flat_color);
+  RUN_TEST(test_skip_normalbuffer_leaves_buffer_untouched);
+  RUN_TEST(test_skip_albedobuffer_leaves_buffer_untouched);
+  RUN_TEST(test_skip_framebuffer_leaves_framebuffer_and_albedo_untouched);
   return UNITY_END();
 }

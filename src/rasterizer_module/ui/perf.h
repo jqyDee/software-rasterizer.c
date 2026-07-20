@@ -10,6 +10,14 @@ typedef enum {
   PERF_FRAMETIME,
   PERF_CLEAR,
   PERF_RENDER,
+  PERF_RENDER_GEOM,
+  PERF_RENDER_GEOM_XFORM, /* object->world transform slice of PERF_RENDER_GEOM */
+  PERF_RENDER_BINNING,
+  PERF_RENDER_RASTER,
+  PERF_RASTER_ITER,       /* pixels tested against a triangle's edge eqns */
+  PERF_RASTER_EDGE_PASS,  /* of those, pixels actually inside the triangle */
+  PERF_RASTER_DEPTH_PASS, /* of those, pixels that also won the depth test */
+  PERF_RENDER_SHADOW,
   PERF_UPLOAD,
   PERF_UNIFORM,
   PERF_SHADING,

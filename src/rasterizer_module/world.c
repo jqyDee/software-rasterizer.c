@@ -23,9 +23,11 @@ bool init_world(world *world, int display_w, int display_h) {
   world->redo_len = 0;
   world->perf = (perf_stats){0};
 
-  init_cam(&world->game_cam);
-  world->debug_cam = world->game_cam;
-  world->cam = &world->game_cam;
+  for (int i = 0; i < MAX_KART_COUNT; i++) {
+    init_cam(&world->game_cams[i]);
+  }
+  world->debug_cam = world->game_cams[0];
+  world->cam = &world->game_cams[0];
   world->player_vy = 0.0f;
 
   world->kart_count = 1;
@@ -48,6 +50,11 @@ bool init_world(world *world, int display_w, int display_h) {
       .camera_radius = 0.35f,
       .seam_bias = 0.0f,
       .ambient_light = 0.8f,
+      .show_kart_debug = false,
+      .debug_skip_texture = false,
+      .debug_skip_normalbuffer = false,
+      .debug_skip_albedobuffer = false,
+      .debug_skip_framebuffer = false,
       .lighting_mode = LIGHTING_GPU_PHONG,
   };
   world->selected_instance = -1;
@@ -56,6 +63,11 @@ bool init_world(world *world, int display_w, int display_h) {
   world->instances = NULL;
   world->instance_count = 0;
   world->instance_capacity = 0;
+  world->world_verts_cache = NULL;
+  world->world_verts_cache_cap = 0;
+  world->instance_vert_offset = NULL;
+  world->instance_vert_cached = NULL;
+  world->instance_offset_cap = 0;
   world->tex_lib = NULL;
   world->tex_lib_count = 0;
 
@@ -169,6 +181,10 @@ void destroy_world(world *world) {
       free(world->instances[i].tex_pixels);
     free(world->instances);
   }
+
+  free(world->world_verts_cache);
+  free(world->instance_vert_offset);
+  free(world->instance_vert_cached);
 
   free_texture_library(world);
 

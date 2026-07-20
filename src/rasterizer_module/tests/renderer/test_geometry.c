@@ -22,13 +22,13 @@ extern int clip_triangle_near_plane_uv(const vec3f verts[3],
                                        vec3f out_pos[4], vec2f out_uvs[4],
                                        vec3f out_normals[4],
                                        float out_shadow[4]);
-extern void compute_bbox(const vec3f proj[3], const int screen_width,
-                         const int screen_height, int *bx0, int *bx1, int *by0,
-                         int *by1);
+extern void compute_bbox(const vec3f proj[3], int x0, int y0, int x1, int y1,
+                         int *bx0, int *bx1, int *by0, int *by1);
 extern void get_uvs(const vec2f *uvs, size_t triangle_id, vec2f out[3]);
 extern void triangle_coordinates_to_tile_coordinates(
-    const screen_tri_t *screen_triangle, const int tiles_x, const int tiles_y,
-    int *tx0, int *tx1, int *ty0, int *ty1);
+    const screen_tri_t *screen_triangle, const int vp_x0, const int vp_y0,
+    const int tiles_x, const int tiles_y, int *tx0, int *tx1, int *ty0,
+    int *ty1);
 extern float compute_fp_edge_bias(const vec3f proj[3], const int screen_width,
                            const int screen_height, const float seam_bias);
 
@@ -215,7 +215,7 @@ void test_compute_face_normal_matches_expected_axis(void) {
 void test_compute_bbox_basic(void) {
   vec3f proj[3] = {{10, 20, 1}, {30, 5, 1}, {20, 40, 1}};
   int bx0, by0, bx1, by1;
-  compute_bbox(proj, 800, 600, &bx0, &bx1, &by0, &by1);
+  compute_bbox(proj, 0, 0, 799, 599, &bx0, &bx1, &by0, &by1);
   TEST_ASSERT_EQUAL_INT(10, bx0);
   TEST_ASSERT_EQUAL_INT(5, by0);
   TEST_ASSERT_EQUAL_INT(30, bx1);
@@ -225,7 +225,7 @@ void test_compute_bbox_basic(void) {
 void test_compute_bbox_clamped_to_screen(void) {
   vec3f proj[3] = {{-10, -5, 1}, {900, 0, 1}, {400, 700, 1}};
   int bx0, by0, bx1, by1;
-  compute_bbox(proj, 800, 600, &bx0, &bx1, &by0, &by1);
+  compute_bbox(proj, 0, 0, 799, 599, &bx0, &bx1, &by0, &by1);
   TEST_ASSERT_EQUAL_INT(0, bx0);
   TEST_ASSERT_EQUAL_INT(0, by0);
   TEST_ASSERT_EQUAL_INT(799, bx1);
@@ -294,8 +294,8 @@ void test_area_not_collapsed_normal_triangle(void) {
 
 void test_tile_coords_origin_tile(void) {
   int x0, x1, y0, y1;
-  tile_coordinates_to_triangle_coordinates(0, 10, 320, 240, &x0, &x1, &y0,
-                                           &y1);
+  tile_coordinates_to_triangle_coordinates(0, 10, 0, 0, 320, 240, &x0, &x1,
+                                           &y0, &y1);
   TEST_ASSERT_EQUAL_INT(0, x0);
   TEST_ASSERT_EQUAL_INT(0, y0);
   TEST_ASSERT_EQUAL_INT(TILE_SIZE - 1, x1);
@@ -304,8 +304,8 @@ void test_tile_coords_origin_tile(void) {
 
 void test_tile_coords_second_tile_x(void) {
   int x0, x1, y0, y1;
-  tile_coordinates_to_triangle_coordinates(1, 10, 320, 240, &x0, &x1, &y0,
-                                           &y1);
+  tile_coordinates_to_triangle_coordinates(1, 10, 0, 0, 320, 240, &x0, &x1,
+                                           &y0, &y1);
   TEST_ASSERT_EQUAL_INT(TILE_SIZE, x0);
   TEST_ASSERT_EQUAL_INT(0, y0);
 }
@@ -313,8 +313,8 @@ void test_tile_coords_second_tile_x(void) {
 void test_tile_coords_second_row(void) {
   int x0, x1, y0, y1;
   /* tiles_x=2 → tile index 2 = row 1, col 0 */
-  tile_coordinates_to_triangle_coordinates(2, 2, 320, 240, &x0, &x1, &y0,
-                                           &y1);
+  tile_coordinates_to_triangle_coordinates(2, 2, 0, 0, 320, 240, &x0, &x1,
+                                           &y0, &y1);
   TEST_ASSERT_EQUAL_INT(0, x0);
   TEST_ASSERT_EQUAL_INT(TILE_SIZE, y0);
 }
@@ -322,7 +322,8 @@ void test_tile_coords_second_row(void) {
 void test_tile_coords_clamps_at_screen_edge(void) {
   /* screen 33px wide: tile 1 x1 would be 63, clamped to 32 */
   int x0, x1, y0, y1;
-  tile_coordinates_to_triangle_coordinates(1, 2, 33, 32, &x0, &x1, &y0, &y1);
+  tile_coordinates_to_triangle_coordinates(1, 2, 0, 0, 33, 32, &x0, &x1, &y0,
+                                           &y1);
   TEST_ASSERT_EQUAL_INT(32, x1);
 }
 
@@ -386,7 +387,7 @@ static screen_tri_t make_tri(int bx0, int by0, int bx1, int by1) {
 void test_count_single_tri_single_tile(void) {
   screen_tri_t tris[1] = {make_tri(0, 0, TILE_SIZE - 1, TILE_SIZE - 1)};
   int counts[4] = {0};
-  compute_triangles_per_tile(counts, 4, 1, tris, 2, 2);
+  compute_triangles_per_tile(counts, 4, 1, tris, 0, 0, 2, 2);
   TEST_ASSERT_EQUAL_INT(1, counts[0]);
   TEST_ASSERT_EQUAL_INT(0, counts[1]);
   TEST_ASSERT_EQUAL_INT(0, counts[2]);
@@ -396,7 +397,7 @@ void test_count_single_tri_single_tile(void) {
 void test_count_tri_spanning_all_tiles(void) {
   screen_tri_t tris[1] = {make_tri(0, 0, TILE_SIZE * 2 - 1, TILE_SIZE * 2 - 1)};
   int counts[4] = {0};
-  compute_triangles_per_tile(counts, 4, 1, tris, 2, 2);
+  compute_triangles_per_tile(counts, 4, 1, tris, 0, 0, 2, 2);
   TEST_ASSERT_EQUAL_INT(1, counts[0]);
   TEST_ASSERT_EQUAL_INT(1, counts[1]);
   TEST_ASSERT_EQUAL_INT(1, counts[2]);
@@ -409,7 +410,7 @@ void test_count_two_tris_different_tiles(void) {
       make_tri(TILE_SIZE, 0, TILE_SIZE * 2 - 1, TILE_SIZE - 1),
   };
   int counts[4] = {0};
-  compute_triangles_per_tile(counts, 4, 2, tris, 2, 2);
+  compute_triangles_per_tile(counts, 4, 2, tris, 0, 0, 2, 2);
   TEST_ASSERT_EQUAL_INT(1, counts[0]); /* tile (0,0) */
   TEST_ASSERT_EQUAL_INT(1, counts[1]); /* tile (1,0) */
   TEST_ASSERT_EQUAL_INT(0, counts[2]);
@@ -423,9 +424,9 @@ void test_bin_single_tri_lands_in_tile0(void) {
   int counts[4] = {0};
   int starts[4] = {0};
   int bin[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
-  compute_triangles_per_tile(counts, 4, 1, tris, 2, 2);
+  compute_triangles_per_tile(counts, 4, 1, tris, 0, 0, 2, 2);
   compute_tile_starts(starts, counts, 4);
-  bin_triangles_into_tiles(counts, tris, bin, starts, 4, 1, 2, 2);
+  bin_triangles_into_tiles(counts, tris, bin, starts, 4, 1, 0, 0, 2, 2);
   TEST_ASSERT_EQUAL_INT(0, bin[0]); /* tile 0 → triangle index 0 */
 }
 
@@ -434,9 +435,9 @@ void test_bin_tri_spanning_all_tiles_appears_in_each(void) {
   int counts[4] = {0};
   int starts[4] = {0};
   int bin[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
-  compute_triangles_per_tile(counts, 4, 1, tris, 2, 2);
+  compute_triangles_per_tile(counts, 4, 1, tris, 0, 0, 2, 2);
   compute_tile_starts(starts, counts, 4);
-  bin_triangles_into_tiles(counts, tris, bin, starts, 4, 1, 2, 2);
+  bin_triangles_into_tiles(counts, tris, bin, starts, 4, 1, 0, 0, 2, 2);
   /* each tile has 1 entry pointing at triangle 0 */
   for (int ti = 0; ti < 4; ti++)
     TEST_ASSERT_EQUAL_INT(0, bin[starts[ti]]);
@@ -450,9 +451,9 @@ void test_bin_two_tris_correct_slots(void) {
   int counts[4] = {0};
   int starts[4] = {0};
   int bin[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
-  compute_triangles_per_tile(counts, 4, 2, tris, 2, 2);
+  compute_triangles_per_tile(counts, 4, 2, tris, 0, 0, 2, 2);
   compute_tile_starts(starts, counts, 4);
-  bin_triangles_into_tiles(counts, tris, bin, starts, 4, 2, 2, 2);
+  bin_triangles_into_tiles(counts, tris, bin, starts, 4, 2, 0, 0, 2, 2);
   TEST_ASSERT_EQUAL_INT(0, bin[starts[0]]); /* tile 0 → tri 0 */
   TEST_ASSERT_EQUAL_INT(1, bin[starts[1]]); /* tile 1 → tri 1 */
 }

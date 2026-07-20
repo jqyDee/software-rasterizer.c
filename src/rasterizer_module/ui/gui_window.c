@@ -23,7 +23,7 @@ bool do_window(WinState *w, const char *title, float width,
   if (w->pos.y + win_h > sh)
     w->pos.y = sh - win_h;
 
-  Rectangle drag_area = {w->pos.x, w->pos.y, width - TITLE_H, TITLE_H};
+  Rectangle drag_area = {w->pos.x, w->pos.y, width - TITLE_H * 2.0f, TITLE_H};
   Vector2 mouse = GetMousePosition();
 
   if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) &&
@@ -51,8 +51,12 @@ bool do_window(WinState *w, const char *title, float width,
   }
 
   if (w->minimized) {
-    GuiStatusBar((Rectangle){w->pos.x, w->pos.y, width - TITLE_H, TITLE_H},
+    GuiStatusBar((Rectangle){w->pos.x, w->pos.y, width - TITLE_H * 2.0f, TITLE_H},
                  title);
+    if (GuiButton(
+            (Rectangle){w->pos.x + width - TITLE_H * 2.0f, w->pos.y, TITLE_H, TITLE_H},
+            w->pinned ? "P" : "-"))
+      w->pinned = !w->pinned;
     if (GuiButton(
             (Rectangle){w->pos.x + width - TITLE_H, w->pos.y, TITLE_H, TITLE_H},
             "x"))
@@ -65,6 +69,12 @@ bool do_window(WinState *w, const char *title, float width,
     w->open = false;
     return false;
   }
+  
+  if (GuiButton((Rectangle){w->pos.x + width - TITLE_H * 2.0f, w->pos.y, TITLE_H, TITLE_H},
+                w->pinned ? "P" : "-")) {
+    w->pinned = !w->pinned;
+  }
+  
   return true;
 }
 

@@ -6,24 +6,72 @@
 #include "../math/transformation.h"
 #include "../math/vec.h"
 
+void compute_instance_basis(const mesh_instance *inst, transform_basis *out) {
+  float rx = inst->rotation.x * DEG_TO_RAD;
+  float ry = inst->rotation.y * DEG_TO_RAD;
+  float rz = inst->rotation.z * DEG_TO_RAD;
+
+  out->right = (vec3f){inst->scale.x, 0, 0};
+  out->right = rotate_z_snapped(out->right, rz);
+  out->right = rotate_x_snapped(out->right, rx);
+  out->right = rotate_y_snapped(out->right, ry);
+
+  out->up = (vec3f){0, inst->scale.y, 0};
+  out->up = rotate_z_snapped(out->up, rz);
+  out->up = rotate_x_snapped(out->up, rx);
+  out->up = rotate_y_snapped(out->up, ry);
+
+  out->fwd = (vec3f){0, 0, inst->scale.z};
+  out->fwd = rotate_z_snapped(out->fwd, rz);
+  out->fwd = rotate_x_snapped(out->fwd, rx);
+  out->fwd = rotate_y_snapped(out->fwd, ry);
+
+  out->pos = inst->pos;
+
+  out->n_right = (vec3f){inst->scale.x != 0.0f ? 1.0f / inst->scale.x : 1.0f, 0, 0};
+  out->n_right = rotate_z_snapped(out->n_right, rz);
+  out->n_right = rotate_x_snapped(out->n_right, rx);
+  out->n_right = rotate_y_snapped(out->n_right, ry);
+
+  out->n_up = (vec3f){0, inst->scale.y != 0.0f ? 1.0f / inst->scale.y : 1.0f, 0};
+  out->n_up = rotate_z_snapped(out->n_up, rz);
+  out->n_up = rotate_x_snapped(out->n_up, rx);
+  out->n_up = rotate_y_snapped(out->n_up, ry);
+
+  out->n_fwd = (vec3f){0, 0, inst->scale.z != 0.0f ? 1.0f / inst->scale.z : 1.0f};
+  out->n_fwd = rotate_z_snapped(out->n_fwd, rz);
+  out->n_fwd = rotate_x_snapped(out->n_fwd, rx);
+  out->n_fwd = rotate_y_snapped(out->n_fwd, ry);
+}
+
+void transform_triangle_with_basis(const mesh *mesh_data, size_t triangle_index, const transform_basis *basis, vec3f out[3]) {
+  for (int j = 0; j < 3; j++) {
+    vec3f src = mesh_data->vertices[triangle_index + j];
+    out[j] = (vec3f){
+      src.x * basis->right.x + src.y * basis->up.x + src.z * basis->fwd.x + basis->pos.x,
+      src.x * basis->right.y + src.y * basis->up.y + src.z * basis->fwd.y + basis->pos.y,
+      src.x * basis->right.z + src.y * basis->up.z + src.z * basis->fwd.z + basis->pos.z
+    };
+  }
+}
+
+void transform_normal_with_basis(vec3f normal, const transform_basis *basis, const cam *cam, vec3f *out) {
+  vec3f v = (vec3f){
+    normal.x * basis->n_right.x + normal.y * basis->n_up.x + normal.z * basis->n_fwd.x,
+    normal.x * basis->n_right.y + normal.y * basis->n_up.y + normal.z * basis->n_fwd.y,
+    normal.x * basis->n_right.z + normal.y * basis->n_up.z + normal.z * basis->n_fwd.z
+  };
+
+  v = rotate_y(v, -cam->yaw);
+  v = rotate_x(v, -cam->pitch);
+  *out = vec_normalize(v);
+}
+
 void transform_triangle_to_world(const mesh *mesh_data, size_t triangle_index,
                                  const mesh_instance *inst, vec3f out[3]) {
-  const mesh *mesh = &mesh_data[inst->mesh_idx];
-
-  for (int j = 0; j < 3; j++) {
-    vec3f src = mesh->vertices[triangle_index + j];
-
-    // OBJECT SPACE -> WORLD SPACE
-    // scale objects vectors first
-    vec3f v = {src.x * inst->scale.x, src.y * inst->scale.y,
-               src.z * inst->scale.z};
-    // roll -> yaw -> pitch
-    v = rotate_z_snapped(v, inst->rotation.z * DEG_TO_RAD); // roll
-    v = rotate_x_snapped(v, inst->rotation.x * DEG_TO_RAD); // pitch
-    v = rotate_y_snapped(v, inst->rotation.y * DEG_TO_RAD); // yaw
-
-    out[j] = vec_add(v, inst->pos); // translate
-  }
+  transform_basis basis;
+  compute_instance_basis(inst, &basis);
+  transform_triangle_with_basis(mesh_data, triangle_index, &basis, out);
 }
 
 void transform_triangle_to_camera(const mesh *mesh_data, size_t triangle_index,

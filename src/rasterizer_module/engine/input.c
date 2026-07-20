@@ -7,6 +7,7 @@
 #include "../math/collision.h"
 #include "../math/vec.h"
 #include "../world.h"
+#include "instance.h"
 #include "raylib.h"
 
 // ========== DECL ==========
@@ -35,9 +36,12 @@ user_input_response handle_user_input(world *world, const float delta_time) {
 
   for (size_t i = 0; i < world->kart_count; i++) {
     kart *k = &world->karts[i];
-    /* keyboard drives kart 0 only, and only in game mode — in debug mode
-     * WASD/SPACE/SHIFT belong to the free-fly camera */
-    bool allow_keyboard = k->gamepad_id == 0 && !world->settings.show_debug_gui;
+    /* keyboard drives whichever kart has "Keyboard" explicitly assigned
+     * (gamepad_id == -1, set via the Input Assignment dropdown), and only
+     * in game mode — in debug mode WASD/SPACE/SHIFT belong to the free-fly
+     * camera */
+    bool allow_keyboard =
+        k->gamepad_id == -1 && !world->settings.show_debug_gui;
     k->input = get_controller_input(k->gamepad_id, allow_keyboard);
     kart_update(k, &world->track_data, &world->kart_tuning, delta_time);
     kart_reset_frame_input(k);
@@ -140,8 +144,10 @@ INTERNAL_INLINE controller_input get_controller_input(int gamepad_id,
 
   const float STICK_DEADZONE = 0.15f;
 
-  // GAMEPAD INPUT
-  if (IsGamepadAvailable(gamepad_id)) {
+  // GAMEPAD INPUT — gamepad_id is -1 ("Keyboard") or -2 ("None") for karts
+  // not assigned a pad; IsGamepadAvailable has no lower-bound check, so
+  // guard here rather than pass a negative index into raylib
+  if (gamepad_id >= 0 && IsGamepadAvailable(gamepad_id)) {
     // Steering (left stick X) with deadzone
     float steering = GetGamepadAxisMovement(gamepad_id, GAMEPAD_AXIS_LEFT_X);
     if (steering > -STICK_DEADZONE && steering < STICK_DEADZONE) {
@@ -246,7 +252,7 @@ INTERNAL_INLINE user_input_response function_keys(world *world) {
   if (IsKeyPressed(KEY_F3)) {
     world->settings.show_debug_gui = !world->settings.show_debug_gui;
     world->cam =
-        world->settings.show_debug_gui ? &world->debug_cam : &world->game_cam;
+        world->settings.show_debug_gui ? &world->debug_cam : &world->game_cams[0];
   }
   if (IsKeyPressed(KEY_F4)) {
     world->settings.track_editor_active = !world->settings.track_editor_active;
@@ -260,6 +266,16 @@ INTERNAL_INLINE user_input_response function_keys(world *world) {
   }
   if (IsKeyPressed(KEY_F6)) {
     return UIR_RESET_CAM_AND_POSITION;
+  }
+  if (IsKeyPressed(KEY_F7)) {
+    // debug-only split-screen toggle until real player-count/menu
+    // cycles local player/viewport count 1 -> 2 -> 3 -> 4 -> 1
+    size_t next_count = (world->kart_count % MAX_KART_COUNT) + 1;
+    destroy_karts(world);
+    world->kart_count = next_count;
+    init_karts(world, world->kart_count);
+    link_kart_instances(world);
+    kart_spawn_at_start(world);
   }
   return UIR_NONE;
 }
@@ -301,7 +317,7 @@ INTERNAL_INLINE void ctrl_click_pick(world *world) {
       fb_y < world->renderer->screen_height) {
     int id =
         world->renderer->idbuffer[fb_y * world->renderer->screen_width + fb_x];
-    if (id >= 0)
+    if (id >= 0 && !instance_is_protected(world, id))
       world->selected_instance = id;
   }
 }

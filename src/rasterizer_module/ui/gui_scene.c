@@ -6,6 +6,8 @@
 
 #include "../engine/instance.h"
 #include "../engine/scene.h"
+#include "../game/kart.h"
+#include "../game/track.h"
 
 void draw_scene_window(world *world, gui_state_t *gs, float delta_time) {
   const float SCENE_W = 220.0f;
@@ -32,26 +34,39 @@ void draw_scene_window(world *world, gui_state_t *gs, float delta_time) {
     float y_filebtns = y_name + ROW_H;
     float y_status = y_filebtns + ROW_H;
 
-    /* instance list (back layer — drawn first) */
+    /* instance list (back layer — drawn first) — the track instance and
+     * kart visuals are engine-managed (see instance_is_protected) and
+     * shown locked: greyed out, not selectable, can't be dragged or
+     * removed */
     for (int i = 0; i < (int)world->instance_count; i++) {
       const char *mname = world->mesh_data[world->instances[i].mesh_idx].name;
+      bool locked = instance_is_protected(world, i);
       char label[64];
-      snprintf(label, sizeof(label), "[%d] %s", i, mname);
+      snprintf(label, sizeof(label), locked ? "[%d] %s (locked)" : "[%d] %s",
+               i, mname);
 
       bool selected = (world->selected_instance == i);
+      if (locked)
+        GuiDisable();
       GuiToggle((Rectangle){x, y_list + (float)i * ROW_H, aw, ROW_H - 2}, label,
                 &selected);
-      if (selected && world->selected_instance != i)
-        world->selected_instance = i;
-      else if (!selected && world->selected_instance == i)
-        world->selected_instance = -1;
+      if (locked)
+        GuiEnable();
+      if (!locked) {
+        if (selected && world->selected_instance != i)
+          world->selected_instance = i;
+        else if (!selected && world->selected_instance == i)
+          world->selected_instance = -1;
+      }
     }
 
-    if (world->selected_instance < 0)
+    if (world->selected_instance < 0 ||
+        instance_is_protected(world, world->selected_instance))
       GuiDisable();
     if (GuiButton((Rectangle){x, y_remove, aw, ROW_H - 2}, "Remove Selected"))
       remove_instance(world, world->selected_instance);
-    if (world->selected_instance < 0)
+    if (world->selected_instance < 0 ||
+        instance_is_protected(world, world->selected_instance))
       GuiEnable();
 
     /* File section */
@@ -79,8 +94,15 @@ void draw_scene_window(world *world, gui_state_t *gs, float delta_time) {
       if (GuiButton((Rectangle){x + hw + GAP, y_filebtns, hw, ROW_H - 2},
                     "Load")) {
         status_ok = scene_load(world, path);
-        if (status_ok)
+        if (status_ok) {
           reload_instance_textures(world);
+          /* scene_load wipes and rebuilds world->instances from scratch, so
+           * the track mesh and every kart's visual link (kart->instance_idx)
+           * must be re-established — same sequence init_world runs at boot */
+          track_build_mesh(world);
+          link_kart_instances(world);
+          kart_spawn_at_start(world);
+        }
         status_timer = 3.0f;
         if (status_ok)
           snprintf(status_msg, sizeof(status_msg), "Loaded %s (%zu inst)", path,

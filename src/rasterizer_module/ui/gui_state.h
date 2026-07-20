@@ -12,6 +12,7 @@ typedef struct {
   bool drag_active;
   Vector2 drag_origin;
   Vector2 drag_offset;
+  bool pinned;
 } WinState;
 
 typedef struct {

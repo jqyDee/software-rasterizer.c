@@ -15,4 +15,4 @@ typedef struct light_s {
     float intensity;
 } light_t;
 
-void compute_light_dirs_cam(world *world);
+void compute_light_dirs_cam(world *world, int viewport_index);
