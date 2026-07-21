@@ -14,46 +14,22 @@
 #include "tiling.h"
 #include <raylib.h>
 
-// rasterizes one viewport's worth of geometry (transform -> bin -> draw).
-// screen_triangles/tile_*_buf/bin_buf are reused across viewports: each call
-// fully overwrites them before draw_tiles_parallel reads them back, so
-// there's no cross-viewport aliasing even though the buffers are static.
-INTERNAL_INLINE void render_viewport(world *world, const viewport *vp,
-                                     int viewport_index,
-                                     screen_tri_t screen_triangles[MAX_SCREEN_TRIS],
-                                     int tile_count_buf[MAX_TILES],
-                                     int tile_start_buf[MAX_TILES],
-                                     int bin_buf[MAX_BIN_ENTRIES],
-                                     double *t_geom, double *t_geom_xform,
-                                     double *t_bin,
-                                     double *t_raster, long *r_iter,
-                                     long *r_edge_pass, long *r_depth_pass) {
-  int tiles_x = (vp->w + TILE_SIZE - 1) / TILE_SIZE;
-  int tiles_y = (vp->h + TILE_SIZE - 1) / TILE_SIZE;
-
-  int num_tiles = tiles_x * tiles_y;
-  if (num_tiles > MAX_TILES)
-    num_tiles = MAX_TILES; // safety clamp
+// builds one viewport's worth of screen-space triangles, appending into the
+// shared screen_triangles array at running_offset (not overwriting from 0)
+// so every active viewport's geometry can be binned+drawn in a single pass
+// afterward — see render(). Returns the count this call actually produced.
+INTERNAL_INLINE int accumulate_viewport_tris(
+    world *world, const viewport *vp, int viewport_index,
+    screen_tri_t screen_triangles[MAX_SCREEN_TRIS], int running_offset,
+    double *t_geom, double *t_geom_xform) {
+  int max_out = MAX_SCREEN_TRIS - running_offset;
 
   double t0 = GetTime();
-  int screen_triangles_count =
-      build_screen_tris(world, vp, viewport_index, screen_triangles, t_geom_xform);
+  int produced = build_screen_tris(world, vp, viewport_index,
+                                   &screen_triangles[running_offset], max_out,
+                                   t_geom_xform);
   *t_geom += (GetTime() - t0);
-
-  t0 = GetTime();
-  compute_triangles_per_tile(tile_count_buf, num_tiles, screen_triangles_count,
-                             screen_triangles, vp->x, vp->y, tiles_x, tiles_y);
-  compute_tile_starts(tile_start_buf, tile_count_buf, num_tiles);
-  bin_triangles_into_tiles(tile_count_buf, screen_triangles, bin_buf,
-                           tile_start_buf, num_tiles, screen_triangles_count,
-                           vp->x, vp->y, tiles_x, tiles_y);
-  *t_bin += (GetTime() - t0);
-
-  t0 = GetTime();
-  draw_tiles_parallel(world, vp, num_tiles, tile_count_buf, tile_start_buf,
-                      bin_buf, screen_triangles, tiles_x, r_iter, r_edge_pass,
-                      r_depth_pass);
-  *t_raster += (GetTime() - t0);
+  return produced;
 }
 
 void render(world *world) {
@@ -66,6 +42,7 @@ void render(world *world) {
   double t_geom = 0.0, t_geom_xform = 0.0, t_bin = 0.0, t_raster = 0.0,
          t_shadow = 0.0;
   long r_iter = 0, r_edge_pass = 0, r_depth_pass = 0;
+  int screen_triangles_count = 0;
 
   reset_world_vertex_cache(world);
 
@@ -81,9 +58,9 @@ void render(world *world) {
     // free-fly debug cam (or no karts yet): single full-frame pass through
     // whatever world->cam currently points at, split-screen disabled
     viewport vp = viewport_full_frame(world->renderer);
-    render_viewport(world, &vp, 0, screen_triangles, tile_count_buf,
-                    tile_start_buf, bin_buf, &t_geom, &t_geom_xform, &t_bin,
-                    &t_raster, &r_iter, &r_edge_pass, &r_depth_pass);
+    screen_triangles_count += accumulate_viewport_tris(
+        world, &vp, 0, screen_triangles, screen_triangles_count, &t_geom,
+        &t_geom_xform);
   } else {
     cam *saved_cam = world->cam;
     for (size_t i = 0; i < world->kart_count; i++) {
@@ -91,11 +68,45 @@ void render(world *world) {
                                           world->renderer->screen_width,
                                           world->renderer->screen_height);
       world->cam = &world->game_cams[i];
-      render_viewport(world, &vp, (int)i, screen_triangles, tile_count_buf,
-                      tile_start_buf, bin_buf, &t_geom, &t_geom_xform, &t_bin,
-                      &t_raster, &r_iter, &r_edge_pass, &r_depth_pass);
+      screen_triangles_count += accumulate_viewport_tris(
+          world, &vp, (int)i, screen_triangles, screen_triangles_count,
+          &t_geom, &t_geom_xform);
     }
     world->cam = saved_cam;
+  }
+
+  // single merged bin + draw pass spanning the whole framebuffer: every
+  // triangle's bbox is already clamped to its own originating viewport's
+  // rect in absolute framebuffer coordinates (see compute_bbox call in
+  // build_screen_tris), so binning by absolute tile coords here can't cause
+  // cross-viewport bleed — this just lets OpenMP load-balance across every
+  // tile from every viewport in one parallel region instead of N separate
+  // ones (each viewport previously left threads idle in its own light-load
+  // pass while a busy viewport's pass bottlenecked).
+  {
+    viewport full_vp = viewport_full_frame(world->renderer);
+    int tiles_x = (full_vp.w + TILE_SIZE - 1) / TILE_SIZE;
+    int tiles_y = (full_vp.h + TILE_SIZE - 1) / TILE_SIZE;
+    int num_tiles = tiles_x * tiles_y;
+    if (num_tiles > MAX_TILES)
+      num_tiles = MAX_TILES; // safety clamp
+
+    double t0 = GetTime();
+    compute_triangles_per_tile(tile_count_buf, num_tiles,
+                               screen_triangles_count, screen_triangles,
+                               full_vp.x, full_vp.y, tiles_x, tiles_y);
+    compute_tile_starts(tile_start_buf, tile_count_buf, num_tiles);
+    bin_triangles_into_tiles(tile_count_buf, screen_triangles, bin_buf,
+                             tile_start_buf, num_tiles,
+                             screen_triangles_count, full_vp.x, full_vp.y,
+                             tiles_x, tiles_y);
+    t_bin += (GetTime() - t0);
+
+    t0 = GetTime();
+    draw_tiles_parallel(world, &full_vp, num_tiles, tile_count_buf,
+                        tile_start_buf, bin_buf, screen_triangles, tiles_x,
+                        &r_iter, &r_edge_pass, &r_depth_pass);
+    t_raster += (GetTime() - t0);
   }
 
   perf_record(&world->perf.metrics[PERF_RENDER_GEOM], (float)(t_geom * 1000.0));

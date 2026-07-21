@@ -28,9 +28,14 @@ bool edge_collapsed(const vec3f proj[3]);
 // xform_time is accumulated into (+=), not overwritten — caller resets once
 // per frame and sums across every viewport's call, mirroring t_geom/t_bin/
 // t_raster in render().
+// max_out is the number of slots remaining in screen_triangles starting at
+// the pointer passed in (not MAX_SCREEN_TRIS) — callers append multiple
+// viewports' triangles into one shared array via a running offset, so this
+// must reflect only what's actually left, or a later viewport's call could
+// write past the real end of the array.
 int build_screen_tris(world *world, const viewport *vp, int viewport_index,
                       struct screen_tri_s screen_triangles[MAX_SCREEN_TRIS],
-                      double *xform_time);
+                      int max_out, double *xform_time);
 
 // call once per frame, before the first build_screen_tris call: (re)sizes
 // world's object->world transform cache and marks every instance's slot

@@ -51,109 +51,109 @@ delete `raylib-macos-viewport.patch`.
 
 ## Mario Kart-like racing game (in progress)
 
-Single-player car physics + camera, then split-screen multiplayer.
+**Phase 1 roadmap — DONE.** Kart entity, gamepad+keyboard input, ground
+movement, drift→boost state machine, jump/air physics, third-person follow
+camera (`kart_update_cameras`, `game/kart.c`), track collision + checkpoints/
+laps, kart rendering, split-screen (up to 4P, `renderer/renderer.c`). Debug
+free-fly cam (F1) still available alongside the game cam. HUD
+(`draw_kart_hud`, `ui/gui_kart.c`) shows speed/drift/boost/ground-air state
+and lap/timer per player. See `game/kart_tuning.h` for the tuning parameters
+(accel/friction/drift/boost/gravity/jump), editable live in the Kart debug
+window.
 
-**Design decisions:**
-- Hybrid physics: arcade ground movement (steering + friction curves), realistic air physics (gravity + rotation)
-- Drifting: state machine (NONE → DRIFTING → BOOST_READY). Hold B to drift, release to apply boost
-- Jump: press A when grounded, adds upward velocity. Mid-air: stick rotates kart
-- Camera: third-person follow, looks ahead based on velocity
-- Input: steering (analog X or A/D), accel/brake (button hold), jump (A), drift (B)
-- Keep debug camera (F1 free cam) for map editing
-- Track collision v1: raycast ground, simple bounds check for off-track
+**Phase 2 roadmap — not started, ranked by cost/impact:**
 
-**Implementation roadmap (order matters):**
-1. **Kart entity** — struct with position, velocity, forward_dir, rotation, ground/drift/air state
-2. **Input system** — gamepad + keyboard mapping (steering, accel, brake, jump, drift)
-3. **Ground movement** — steering rotates kart, accel/brake modify velocity, apply friction
-4. **Drifting** — state machine, steering while drifting modifies slip angle, accumulate boost
-5. **Jump & air** — button press → upward velocity, gravity pulls down, stick rotates in air
-6. **Camera** — follow behind kart, look ahead scaled by speed
-7. **Track collision** — raycast down for grounding, bounding box for off-track zones
-8. **Kart rendering** — draw kart model in world (use existing mesh system)
-9. **Split-screen** — render two cameras side-by-side or top/bottom (phase 2)
+1. **Race placement + finish condition** (cheapest, do first) — `kart->lap`/
+   `next_checkpoint`/`lap_time`/`best_lap_time` already exist per-kart
+   (`game/kart.h`); needs cross-kart comparison each frame to rank karts
+   live (1st/2nd/3rd/4th, shown in HUD) and a "race finished" state once a
+   kart completes the target lap count (currently laps just increment
+   forever with no win condition). Turns this from a driving sandbox into
+   an actual race.
+2. **Items** — the core Mario Kart mechanic, currently 0% built. Start with
+   one hazard (banana peel: static world object, triggers a spin-out on
+   kart collision) and one pickup (speed boost pad, reuses the existing
+   `boost_visual`/speed-multiplier plumbing already in `kart_update`).
+   Needs: pickup spawn points (track data?), a collision check against kart
+   position each frame, and a pickup/item-state field on `kart`.
+3. **AI/bots** — biggest lift. Needed for solo play without split-screen.
+   Path-following off the existing track spline (`track_sample_pos`,
+   `game/track.c`, already used for start-grid placement) to drive a
+   steering target, feeding into the same `controller_input` struct real
+   karts already consume in `kart_update` — reuse the input path, don't
+   build a separate AI-specific movement model.
 
-**Tuning parameters (placeholder values):**
-- `ACCEL_RATE`: how fast velocity increases per second
-- `FRICTION_COEFFICIENT`: ground drag
-- `DRIFT_FRICTION_MULTIPLIER`: how slippery while drifting
-- `BOOST_ACCUMULATION_RATE`: meter fill speed
-- `BOOST_SPEED_MULTIPLIER`: speed boost magnitude
-- `MAX_DRIFT_ANGLE`: sideways slip limit
-- `GRAVITY`: air fall speed
-- `JUMP_INITIAL_VELOCITY`: upward impulse
+**Smaller polish, any time:** start countdown (3-2-1-GO) before a race
+begins, minimap using existing `track_data` points.
 
 ---
 
 ## Split-screen rendering performance (follow-up to Phase 2)
 
 Split-screen (per-kart viewports, `renderer.c`'s `render()` loop calling
-`build_screen_tris`/bin/`draw_tiles_parallel` once per kart) works correctly
-but frame time drops more than linearly with player count — 4 players cuts
-it to less than half of 1 player. Confirmed via the debug stats overlay
-(F3): `PERF_RENDER` scales roughly with kart count while `PERF_UPLOAD`/
-`PERF_SHADING` stay flat (GPU shading is already a single pass — see below).
+`build_screen_tris`/bin/`draw_tiles_parallel` once per kart) works correctly,
+but CPU cost still doesn't scale as well as it could with player count.
+Debug stats overlay (Stats window) has instrumentation for all of this now:
+`PERF_RENDER_GEOM`/`_GEOM_XFORM`, `PERF_RENDER_BINNING`, `PERF_RENDER_RASTER`
++ `PERF_RASTER_ITER`/`_EDGE_PASS`/`_DEPTH_PASS` (shown as `fill%`/`overdraw`
+in the Stats window), and 4 debug skip-toggles in the Renderer window
+(texture/normal-buf/albedo-buf/framebuffer) for isolating per-fragment
+shading cost by elimination.
 
-**Root cause:** `build_screen_tris` (`renderer/geometry.c`) iterates *every
-instance, every triangle in the scene* once per viewport — transform to
-camera space, backface test, near-plane clip, Lambertian lighting, project,
-bbox/fp-bias — regardless of how much of that geometry is actually visible
-in that viewport. There's no frustum/visibility culling before this loop.
-Going from 1 to N karts multiplies this whole CPU pass by N, even though
-each viewport only covers ~1/N of the screen.
+**DONE — frustum/visibility culling per viewport.** `instance_potentially_visible`
+(`renderer/geometry.c`) runs a conservative bounding-sphere-vs-frustum-cone
+test per instance per viewport, before `build_screen_tris`'s per-triangle
+loop, so instances outside a given viewport's view skip the full
+transform+clip+light+project cost entirely. Already in place — the section
+below describing this as future work is stale.
 
-**Two separate, independent optimizations — don't conflate them:**
+**DONE — object→world transform de-duplication.** The object→world part of
+the per-triangle transform is camera-independent, so split-screen's extra
+viewport passes were redoing it once per kart for the same result. Now
+cached per-instance per-frame (`world->world_verts_cache`,
+`reset_world_vertex_cache` + the cache-fill in `build_screen_tris`,
+`renderer/geometry.c`). Confirmed via `PERF_RENDER_GEOM_XFORM`: 4-player
+xform cost dropped from ~1.0ms back to the 1-player baseline.
 
-### 1. Merge tile binning + draw into one pass (minor win, safe, low effort)
+**DONE — scanline x-range tightening in the rasterizer.** `draw_triangle_pixels_tiled`
+(`renderer/draw.c`) used to brute-test every pixel in a triangle's
+tile-clipped bounding box; `narrow_edge_bound` now analytically bounds each
+scanline's x-range first (padded ±1px, exact per-pixel test unchanged as the
+correctness source of truth). Fill% (useful-test / total-test ratio) went
+from ~35-40% to 85%+.
 
-Right now each viewport gets its own `compute_triangles_per_tile` →
-`compute_tile_starts` → `bin_triangles_into_tiles` → `draw_tiles_parallel`
-cycle, each opening a fresh `#pragma omp parallel for` over just that
-viewport's tiles. Since every triangle's bbox (`screen_tri_t.bx0/by0/bx1/by1`)
-is already clamped to its own viewport's rect in *absolute framebuffer
-coordinates* (Phase 1's design), triangles from different viewports can
-safely share one array and one binning pass without any cross-viewport
-bleed — a triangle's bbox alone keeps it out of tiles outside its viewport.
+**DONE — merged tile binning + draw into one pass.** `render()`
+(`renderer/renderer.c`) now accumulates every active viewport's triangles
+into a shared `screen_triangles[]` via `accumulate_viewport_tris` (running
+offset, `build_screen_tris` takes a `max_out` remaining-capacity param
+instead of hardcoding `MAX_SCREEN_TRIS` so appends can't overflow), then
+runs `compute_triangles_per_tile`/`bin_triangles_into_tiles`/
+`draw_tiles_parallel` **once** over a tile grid spanning the whole
+framebuffer instead of once per viewport. Net effect is scenario-dependent:
+a wash (or very slightly worse, single dispatch overhead) when load is even
+across viewports, a real win when it's uneven (one kart facing dense
+geometry, another open space) since OpenMP now load-balances across *all*
+tiles from *all* viewports in one parallel region instead of leaving threads
+idle in a light viewport's own separate pass. Kept — the uneven case is the
+one that matters in practice.
 
-Plan:
-- `build_screen_tris` still runs once per viewport (unavoidable — each
-  viewport's camera produces a different projection) but **appends** to a
-  shared `screen_triangles[]` with a running offset instead of each viewport
-  restarting from 0 and overwriting the static buffer.
-- Run `compute_triangles_per_tile`/`compute_tile_starts`/
-  `bin_triangles_into_tiles`/`draw_tiles_parallel` **once**, over the tile
-  grid for the *whole* framebuffer (`vp_x0=0, vp_y0=0, tiles_x/y` from full
-  `screen_width/height`) instead of per-viewport.
-- Win: one `omp parallel for` instead of N, and OpenMP load-balances across
-  *all* tiles from *all* viewports at once — an uneven scene (one kart
-  facing a wall of geometry, another facing open sky) won't leave threads
-  idle in the light viewport's pass the way per-viewport parallel regions do.
-- Does **not** reduce the per-triangle transform/lighting cost — only trims
-  the binning/draw overhead around it.
+**Remaining, not yet done:**
 
-### 2. Frustum/visibility culling per viewport (the actual fix, more effort)
+### Per-fragment shading cost (the actual remaining bottleneck)
 
-Skip instances whose bounding volume doesn't overlap a given viewport's
-camera frustum *before* running the full per-triangle transform+clip+light+
-project loop on them, so each viewport's CPU cost scales with what's
-actually visible to it, not total scene size.
-
-Needs:
-- Per-instance bounding volume (AABB or bounding sphere) — not currently
-  tracked anywhere (`mesh_instance` has no bounds field).
-- A frustum test (or cheaper: bounding-sphere-vs-frustum-planes, or even a
-  coarse "is instance within N units and within some angle of cam forward"
-  heuristic given the track is roughly planar) run once per instance per
-  viewport, before `build_screen_tris`'s inner per-triangle loop.
-- Care: the shadow map pass (light-space, camera-independent, already
-  correctly runs once per frame not once per viewport — don't couple this
-  culling to shadow rendering, it needs the light's frustum instead, or no
-  culling at all if the scene stays small).
-
-Worth prototyping culling stats first (how many instances/triangles are
-actually off-frustum in the current test track) before committing to a
-specific bounding-volume scheme — the current scene is small enough that
-the win may not matter until tracks get larger or instance counts grow.
+Isolated via the 4 debug skip-toggles: at 4-player split-screen, texture
+sampling / normal-buffer encode (`sqrt` in `vec_normalize`) / shadow blend +
+framebuffer write each cost roughly ~1-2ms, totalling ~75% of raster time.
+This is legitimate work (not redundant computation like the two fixes
+above) that scales with total shaded pixels across viewports. Two different
+directions, not yet decided between:
+- **Interleave the G-buffer** (depth/normal/albedo/id currently 5 separate
+  heap buffers touched per fragment — real cache/bandwidth contention
+  between them) into one packed struct-of-pixel array. Bigger refactor,
+  touches the GPU upload path and `phong.fs` too.
+- **Dynamic resolution scaling** by player count (lower `render_width`
+  automatically at 3-4P, like real split-screen racing games do) — doesn't
+  reduce per-pixel cost, reduces total pixel count instead. Simpler.
 
 ---
 

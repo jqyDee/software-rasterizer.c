@@ -229,7 +229,7 @@ void reset_world_vertex_cache(world *world) {
 
 int build_screen_tris(world *world, const viewport *vp, int viewport_index,
                       struct screen_tri_s screen_triangles[MAX_SCREEN_TRIS],
-                      double *xform_time) {
+                      int max_out, double *xform_time) {
   int screen_triangles_count = 0;
 
   compute_light_dirs_cam(world, viewport_index);
@@ -422,8 +422,8 @@ int build_screen_tris(world *world, const viewport *vp, int viewport_index,
     screen_triangles_count += thread_tri_counts[t];
   }
 
-  if (screen_triangles_count > MAX_SCREEN_TRIS) {
-    screen_triangles_count = MAX_SCREEN_TRIS; // Clamp global total
+  if (screen_triangles_count > max_out) {
+    screen_triangles_count = max_out; // Clamp to caller's remaining capacity
   }
 
   // Parallel bulk copy
@@ -432,10 +432,13 @@ int build_screen_tris(world *world, const viewport *vp, int viewport_index,
     int start = thread_offsets[t];
     int count = thread_tri_counts[t];
 
-    if (start >= MAX_SCREEN_TRIS) {
+    // max_out=0 (array already full from a prior viewport's triangles)
+    // degrades safely here: start>=0>=max_out always holds, so count is
+    // always forced to 0 below — no special-case needed.
+    if (start >= max_out) {
       count = 0;
-    } else if (start + count > MAX_SCREEN_TRIS) {
-      count = MAX_SCREEN_TRIS - start;
+    } else if (start + count > max_out) {
+      count = max_out - start;
     }
 
     if (count > 0) {
